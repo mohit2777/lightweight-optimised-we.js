@@ -82,7 +82,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Session configuration
 const sessionStore = process.env.DATABASE_URL
   ? new pgSession({
-    conString: process.env.DATABASE_URL,
+    conObject: {
+      connectionString: process.env.DATABASE_URL,
+      ssl: {
+        require: true,
+        rejectUnauthorized: false
+      }
+    },
     tableName: 'session',
     createTableIfMissing: true
   })
@@ -97,11 +103,12 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'your-secret-key-change-this',
   resave: false,
   saveUninitialized: false,
+  proxy: true,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false',
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'strict'
+    sameSite: 'lax'
   }
 }));
 
