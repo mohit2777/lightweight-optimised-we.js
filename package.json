@@ -35,7 +35,7 @@
     "helmet": "^7.1.0",
     "joi": "^17.11.0",
     "moment": "^2.29.4",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.0.0",
     "pg": "^8.16.3",
     "qrcode": "^1.5.3",
     "socket.io": "^4.7.4",
@@ -47,6 +47,11 @@
     "nodemon": "^3.0.2"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=20.0.0"
+  },
+  "overrides": {
+    "glob": "^10.3.10",
+    "rimraf": "^5.0.5",
+    "inflight": "npm:@pnpm/npm-lifecycle@0.0.0"
   }
 }
