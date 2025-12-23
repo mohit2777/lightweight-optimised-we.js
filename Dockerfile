@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:18.17-slim
 
 # Install dependencies for Puppeteer/Chromium
 RUN apt-get update \
@@ -12,6 +12,7 @@ RUN apt-get update \
 
 # Set environment variables
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV NODE_ENV=production
 ENV PORT=7860
@@ -22,8 +23,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install dependencies - skip puppeteer postinstall
+RUN npm install --production --ignore-scripts
 
 # Copy app source
 COPY . .
