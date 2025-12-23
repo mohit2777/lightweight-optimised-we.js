@@ -1,5 +1,5 @@
 # WhatsApp Multi-Automation V2 - Render Optimized Dockerfile
-FROM node:18-slim
+FROM node:20-slim
 
 # Install Chromium and dependencies (Render compatible)
 RUN apt-get update \
