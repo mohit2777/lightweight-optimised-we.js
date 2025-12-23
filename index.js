@@ -15,13 +15,14 @@ const pg = require('pg');
 const pgSession = require('connect-pg-simple')(session);
 
 const { requireAuth, requireGuest, checkSessionTimeout, login, logout, getCurrentUser, verifySessionIntegrity } = require('./middleware/auth');
-const { db, MissingWebhookQueueTableError } = require('./config/database');
+const { db, supabase, MissingWebhookQueueTableError } = require('./config/database');
 const whatsappManager = require('./utils/whatsappManager');
 const webhookDeliveryService = require('./utils/webhookDeliveryService');
 const aiAutoReplyService = require('./utils/aiAutoReply');
 const logger = require('./utils/logger');
 const { validate, schemas } = require('./utils/validator');
 const { apiLimiter, authLimiter, messageLimiter, webhookLimiter, accountLimiter } = require('./utils/rateLimiter');
+const flowRoutes = require('./routes/flowRoutes');
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers like onclick
       fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", "ws:", "wss:"]
@@ -79,18 +81,13 @@ const upload = multer({
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Session configuration
+// Session configuration with enhanced security
 const sessionStore = process.env.DATABASE_URL
   ? new pgSession({
-    conObject: {
-      connectionString: process.env.DATABASE_URL,
-      ssl: {
-        require: true,
-        rejectUnauthorized: false
-      }
-    },
+    conString: process.env.DATABASE_URL,
     tableName: 'session',
-    createTableIfMissing: true
+    createTableIfMissing: true,
+    pruneSessionInterval: 60 * 15 // Prune expired sessions every 15 minutes
   })
   : new session.MemoryStore();
 
@@ -98,17 +95,31 @@ if (!process.env.DATABASE_URL && process.env.NODE_ENV === 'production') {
   logger.warn('WARNING: Using MemoryStore in production. Set DATABASE_URL to use PostgreSQL session store.');
 }
 
+// Generate a secure session secret if not provided
+const sessionSecret = process.env.SESSION_SECRET || require('crypto').randomBytes(32).toString('hex');
+if (!process.env.SESSION_SECRET) {
+  logger.warn('WARNING: Using auto-generated SESSION_SECRET. Set SESSION_SECRET in .env for persistent sessions.');
+}
+
+// Determine if we should use secure cookies
+// Only use secure in production AND when explicitly enabled (for HTTPS deployments)
+const useSecureCookies = process.env.SESSION_COOKIE_SECURE === 'true';
+if (process.env.NODE_ENV === 'production' && !useSecureCookies) {
+  logger.warn('WARNING: Running in production without secure cookies. Set SESSION_COOKIE_SECURE=true if using HTTPS.');
+}
+
 app.use(session({
   store: sessionStore,
-  secret: process.env.SESSION_SECRET || 'your-secret-key-change-this',
+  secret: sessionSecret,
+  name: 'wa.sid', // Custom session cookie name (not default 'connect.sid')
   resave: false,
   saveUninitialized: false,
-  proxy: true,
+  rolling: true, // Reset cookie expiration on each request
   cookie: {
-    secure: process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false',
+    secure: useSecureCookies,
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax'
+    sameSite: useSecureCookies ? 'strict' : 'lax' // Use lax for non-HTTPS to prevent issues
   }
 }));
 
@@ -190,6 +201,11 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), login);
 app.post('/api/auth/logout', logout);
 app.get('/api/auth/user', getCurrentUser);
 
+app.get('/api/auth/user', getCurrentUser);
+
+// Flow Builder API
+app.use('/api/chatbot', flowRoutes);
+
 // ============================================================================
 // DASHBOARD ROUTES
 // ============================================================================
@@ -204,6 +220,10 @@ app.get('/dashboard', requireAuth, (req, res) => {
 
 app.get('/dashboard.html', requireAuth, (req, res) => {
   res.redirect('/dashboard');
+});
+
+app.get('/flow-builder', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'views', 'flow-builder.html'));
 });
 
 // ============================================================================
@@ -256,14 +276,46 @@ app.get('/api/accounts', requireAuth, apiLimiter, async (req, res) => {
   try {
     const accounts = await db.getAccounts();
 
+    // Get webhooks, chatbot configs, and flows for all accounts in parallel (with error handling)
+    let allWebhooks = [], allChatbotConfigs = [], allFlows = [];
+    try {
+      [allWebhooks, allChatbotConfigs, allFlows] = await Promise.all([
+        supabase.from('webhooks').select('account_id, is_active').then(r => r.data || []),
+        supabase.from('ai_auto_replies').select('account_id, is_active').then(r => r.data || []),
+        supabase.from('chatbot_flows').select('account_id, is_active').then(r => r.data || [])
+      ]);
+    } catch (featureErr) {
+      logger.warn('Could not fetch feature indicators:', featureErr.message);
+    }
+
     // Enrich with real-time status from WhatsApp manager (overrides DB status)
     const enrichedAccounts = accounts.map(account => {
       const runtimeStatus = whatsappManager.getAccountStatus(account.id);
+      
+      // Get feature indicators for this account
+      const accountWebhooks = allWebhooks.filter(w => w.account_id === account.id);
+      const accountChatbot = allChatbotConfigs.find(c => c.account_id === account.id);
+      const accountFlows = allFlows.filter(f => f.account_id === account.id);
+      
       return {
         ...account,
         runtime_status: runtimeStatus,
         // Use runtime status if available, otherwise fall back to DB status
-        status: runtimeStatus || account.status
+        status: runtimeStatus || account.status,
+        // Feature indicators
+        features: {
+          webhooks: {
+            count: accountWebhooks.length,
+            active: accountWebhooks.filter(w => w.is_active).length
+          },
+          chatbot: {
+            enabled: accountChatbot?.is_active || false
+          },
+          flows: {
+            count: accountFlows.length,
+            active: accountFlows.filter(f => f.is_active).length
+          }
+        }
       };
     });
 
@@ -444,6 +496,74 @@ app.delete('/api/accounts/:accountId/webhooks/:webhookId', requireAuth, apiLimit
   } catch (error) {
     logger.error(`Error deleting webhook ${req.params.webhookId}:`, error);
     res.status(500).json({ error: 'Failed to delete webhook', message: error.message });
+  }
+});
+
+// Test webhook endpoint
+app.post('/api/accounts/:accountId/webhooks/:webhookId/test', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const { accountId, webhookId } = req.params;
+
+    // Fetch the webhook
+    const webhook = await db.getWebhook(webhookId);
+    if (!webhook) {
+      return res.status(404).json({ error: 'Webhook not found' });
+    }
+
+    // Send a test payload
+    const axios = require('axios');
+    const testPayload = {
+      event: 'test',
+      timestamp: new Date().toISOString(),
+      account_id: accountId,
+      message: 'This is a test webhook from WhatsApp Multi-Automation',
+      data: {
+        test: true,
+        webhook_id: webhookId
+      }
+    };
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'WA-Multi-Automation-Webhook/1.0'
+    };
+
+    // Add signature if secret is configured
+    if (webhook.secret) {
+      const crypto = require('crypto');
+      const signature = crypto
+        .createHmac('sha256', webhook.secret)
+        .update(JSON.stringify(testPayload))
+        .digest('hex');
+      headers['X-Webhook-Signature'] = signature;
+    }
+
+    const response = await axios.post(webhook.url, testPayload, {
+      headers,
+      timeout: 10000,
+      validateStatus: () => true // Don't throw on any status code
+    });
+
+    if (response.status >= 200 && response.status < 300) {
+      res.json({ 
+        success: true, 
+        statusCode: response.status,
+        message: 'Webhook test successful'
+      });
+    } else {
+      res.json({ 
+        success: false, 
+        statusCode: response.status,
+        error: `Webhook returned status ${response.status}`
+      });
+    }
+
+  } catch (error) {
+    logger.error(`Error testing webhook ${req.params.webhookId}:`, error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to test webhook'
+    });
   }
 });
 
@@ -1065,6 +1185,10 @@ async function initializeApp() {
     const fs = require('fs-extra');
     await fs.ensureDir('./sessions');
 
+    // Initialize flow controller with whatsappManager reference
+    const { initializeFlowController } = require('./controllers/flowController');
+    initializeFlowController(whatsappManager);
+
     // Initialize existing accounts
     await whatsappManager.initializeExistingAccounts();
     try {
@@ -1201,13 +1325,25 @@ app.use((err, req, res, next) => {
 
 // Validate critical environment variables
 if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'your-secret-key-change-this') {
-  logger.error('❌ SESSION_SECRET environment variable must be set with a secure random value!');
-  process.exit(1);
+  if (process.env.NODE_ENV === 'production') {
+    logger.error('❌ SESSION_SECRET environment variable must be set with a secure random value!');
+    process.exit(1);
+  } else {
+    logger.warn('⚠️ Using default SESSION_SECRET - set a secure value for production!');
+  }
 }
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
   logger.error('❌ SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set!');
   process.exit(1);
+}
+
+// Log deployment info
+if (process.env.RENDER) {
+  logger.info('🌐 Running on Render');
+}
+if (process.env.RAILWAY_ENVIRONMENT) {
+  logger.info('🚂 Running on Railway');
 }
 
 const PORT = process.env.PORT || 3000;

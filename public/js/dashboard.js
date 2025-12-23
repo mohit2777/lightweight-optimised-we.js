@@ -9,11 +9,12 @@ let webhooks = [];
 const chatbotConfigCache = {};
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     console.log('Dashboard initializing...');
     
-    // Check authentication
-    checkAuth();
+    // Check authentication with server
+    const isAuth = await checkAuth();
+    if (!isAuth) return;
     
     // Setup Socket.IO listeners first
     setupSocketListeners();
@@ -25,11 +26,9 @@ document.addEventListener('DOMContentLoaded', function() {
         console.error('Error setting up event listeners:', error);
     }
     
-    // Load initial data with slight delay for session validation
-    setTimeout(() => {
-        loadStats();
-        loadAccounts();
-    }, 300);
+    // Load initial data
+    loadStats();
+    loadAccounts();
     
     // Set active nav
     setActiveNav();
@@ -37,14 +36,29 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Dashboard initialized successfully');
 });
 
-// Authentication Check
-function checkAuth() {
-    // Session-based authentication - the server will redirect if not authenticated
-    // Just check if we have localStorage flag for better UX
-    const authenticated = localStorage.getItem('authenticated');
-    if (!authenticated) {
+// Authentication Check - verify with server
+async function checkAuth() {
+    try {
+        const response = await fetch('/api/auth/user', {
+            credentials: 'include'
+        });
+        const data = await response.json();
+        
+        if (data.authenticated) {
+            localStorage.setItem('authenticated', 'true');
+            localStorage.setItem('username', data.username || 'admin');
+            return true;
+        } else {
+            localStorage.removeItem('authenticated');
+            localStorage.removeItem('username');
+            window.location.href = '/login';
+            return false;
+        }
+    } catch (error) {
+        console.error('Auth check failed:', error);
+        // On network error, redirect to login
         window.location.href = '/login';
-        return;
+        return false;
     }
 }
 
@@ -130,7 +144,9 @@ function setupEventListeners() {
                 'accounts': 'Accounts',
                 'webhooks': 'Webhooks',
                 'messages': 'Messages',
-                'analytics': 'Analytics'
+                'analytics': 'Analytics',
+                'flows': 'Flow Builder',
+                'system': 'System'
             };
             if (pageTitle) {
                 pageTitle.textContent = viewTitles[view] || 'Dashboard';
@@ -157,6 +173,7 @@ function setupEventListeners() {
             const statsGrid = document.getElementById('statsGrid');
             const analyticsView = document.getElementById('analyticsView');
             const systemView = document.getElementById('systemView');
+            const flowsView = document.getElementById('flowsView');
             
             if (!statsGrid) {
                 // Content was replaced, need to reload page or restore
@@ -172,6 +189,7 @@ function setupEventListeners() {
             if (accountsSection) accountsSection.style.display = 'none';
             if (analyticsView) analyticsView.style.display = 'none';
             if (systemView) systemView.style.display = 'none';
+            if (flowsView) flowsView.style.display = 'none';
             
             switch(view) {
                 case 'dashboard':
@@ -211,6 +229,14 @@ function setupEventListeners() {
                         systemView.style.display = 'block';
                         loadSystemHealth();
                         loadSystemLogs();
+                    }
+                    break;
+
+                case 'flows':
+                    // Show flows view
+                    if (flowsView) {
+                        flowsView.style.display = 'block';
+                        loadFlowsView();
                     }
                     break;
             }
@@ -413,6 +439,10 @@ function setupEventListeners() {
                 case 'chatbot':
                     openChatbotModal(accountId);
                     break;
+                case 'flows':
+                    // Navigate to flow builder with account pre-selected
+                    window.location.href = '/flow-builder?account=' + accountId;
+                    break;
                 case 'delete':
                     deleteAccount(accountId);
                     break;
@@ -597,6 +627,12 @@ function renderAccountsTable() {
         const description = account.description || '';
         const escapedDescription = description.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         
+        // Feature indicators
+        const features = account.features || { webhooks: { count: 0, active: 0 }, chatbot: { enabled: false }, flows: { count: 0, active: 0 } };
+        const hasActiveWebhooks = features.webhooks.active > 0;
+        const hasChatbot = features.chatbot.enabled;
+        const hasActiveFlows = features.flows.active > 0;
+        
         return `
         <tr>
             <td>
@@ -608,6 +644,17 @@ function renderAccountsTable() {
                         <div style="font-weight: 600;">${account.name || 'Unnamed'}</div>
                         ${escapedDescription ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 3px; line-height: 1.4;">${escapedDescription}</div>` : ''}
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px;">${account.phone_number || 'Not connected'}</div>
+                        <div style="display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;">
+                            <span class="feature-badge ${hasActiveWebhooks ? 'active' : 'inactive'}" title="${features.webhooks.active}/${features.webhooks.count} webhooks active">
+                                <i class="fas fa-plug"></i> ${features.webhooks.count > 0 ? features.webhooks.active + '/' + features.webhooks.count : '0'}
+                            </span>
+                            <span class="feature-badge ${hasChatbot ? 'active' : 'inactive'}" title="AI Chatbot ${hasChatbot ? 'enabled' : 'disabled'}">
+                                <i class="fas fa-robot"></i> ${hasChatbot ? 'ON' : 'OFF'}
+                            </span>
+                            <span class="feature-badge ${hasActiveFlows ? 'active' : 'inactive'}" title="${features.flows.active}/${features.flows.count} flows active">
+                                <i class="fas fa-project-diagram"></i> ${features.flows.count > 0 ? features.flows.active + '/' + features.flows.count : '0'}
+                            </span>
+                        </div>
                     </div>
                 </div>
             </td>
@@ -634,6 +681,9 @@ function renderAccountsTable() {
                     </button>
                     <button class="btn-action" data-action="chatbot" data-account-id="${account.id || account.account_id}" title="Configure Chatbot">
                         <i class="fas fa-robot"></i>
+                    </button>
+                    <button class="btn-action" data-action="flows" data-account-id="${account.id || account.account_id}" title="Manage Flows" style="background: linear-gradient(135deg, rgba(236, 72, 153, 0.2), rgba(168, 85, 247, 0.2)); border-color: rgba(236, 72, 153, 0.4);">
+                        <i class="fas fa-project-diagram"></i>
                     </button>
                     <button class="btn-action danger" data-action="delete" data-account-id="${account.id || account.account_id}" title="Delete Account">
                         <i class="fas fa-trash"></i>
@@ -1201,9 +1251,14 @@ function renderWebhooksList(accountId) {
                         · Created: ${formatDate(webhook.created_at)}
                     </div>
                 </div>
-                <button class="btn-action danger" data-action="delete-webhook" data-webhook-id="${webhook.id}" data-account-id="${accountId}" title="Delete">
-                    <i class="fas fa-trash"></i>
-                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn-action" style="background: var(--info); color: white;" onclick="testWebhook('${webhook.id}', '${accountId}', '${webhook.url}')" title="Test Webhook">
+                        <i class="fas fa-vial"></i>
+                    </button>
+                    <button class="btn-action danger" data-action="delete-webhook" data-webhook-id="${webhook.id}" data-account-id="${accountId}" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </div>
         </div>
     `).join('');
@@ -2093,6 +2148,16 @@ function updateChatbotModels() {
             { value: 'mistralai/mistral-nemo:free', label: 'Mistral: Mistral Nemo (Free)' },
             { value: 'mistralai/mistral-7b-instruct:free', label: 'Mistral: Mistral 7B Instruct (Free)' }
         ];
+    } else if (provider === 'groq') {
+        models = [
+            // Free Tier - All models are free with generous limits
+            { value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versatile (Recommended)' },
+            { value: 'llama-3.1-70b-versatile', label: 'Llama 3.1 70B Versatile' },
+            { value: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant (Fastest)' },
+            { value: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B (32K Context)' },
+            { value: 'gemma2-9b-it', label: 'Gemma 2 9B IT' },
+            { value: 'llama-guard-3-8b', label: 'Llama Guard 3 8B (Safety)' }
+        ];
     }
     
     models.forEach(model => {
@@ -2575,3 +2640,411 @@ async function loadSystemHealth() {
         console.error('Error loading system health:', error);
     }
 }
+
+// ===========================
+// FLOWS VIEW FUNCTIONS
+// ===========================
+
+let allFlows = [];
+
+async function loadFlowsView() {
+    const flowsLoading = document.getElementById('flowsLoading');
+    const flowsList = document.getElementById('flowsList');
+    
+    try {
+        if (flowsLoading) flowsLoading.style.display = 'block';
+        if (flowsList) flowsList.style.display = 'none';
+
+        // Fetch flows from API
+        const response = await fetch('/api/chatbot/flows', { credentials: 'include' });
+        if (!response.ok) throw new Error('Failed to fetch flows');
+        
+        allFlows = await response.json();
+        
+        // Update stats
+        const totalFlows = allFlows.length;
+        const activeFlows = allFlows.filter(f => f.is_active).length;
+        const accountsWithFlows = new Set(allFlows.map(f => f.account_id)).size;
+        
+        document.getElementById('totalFlowsStat').textContent = totalFlows;
+        document.getElementById('activeFlowsStat').textContent = activeFlows;
+        document.getElementById('flowAccountsStat').textContent = accountsWithFlows;
+        
+        // Render flows
+        renderFlowsList();
+        
+    } catch (error) {
+        console.error('Error loading flows:', error);
+        if (flowsList) {
+            flowsList.innerHTML = `
+                <div class="empty-state" style="text-align: center; padding: 40px;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: var(--warning); margin-bottom: 15px;"></i>
+                    <p style="color: var(--text-secondary);">Failed to load flows. Please try again.</p>
+                </div>
+            `;
+            flowsList.style.display = 'block';
+        }
+    } finally {
+        if (flowsLoading) flowsLoading.style.display = 'none';
+    }
+}
+
+function renderFlowsList() {
+    const flowsList = document.getElementById('flowsList');
+    if (!flowsList) return;
+    
+    if (allFlows.length === 0) {
+        flowsList.innerHTML = `
+            <div class="empty-state" style="text-align: center; padding: 40px;">
+                <i class="fas fa-project-diagram" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
+                <h3 style="margin-bottom: 10px;">No Flows Created Yet</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">Create your first AI-powered flow to automate conversations.</p>
+                <a href="/flow-builder" class="btn-cyber">
+                    <span class="btn-content"><i class="fas fa-plus"></i> Create First Flow</span>
+                </a>
+            </div>
+        `;
+        flowsList.style.display = 'block';
+        return;
+    }
+    
+    // Group flows by account
+    const flowsByAccount = {};
+    allFlows.forEach(flow => {
+        const accountId = flow.account_id || 'unassigned';
+        if (!flowsByAccount[accountId]) {
+            flowsByAccount[accountId] = [];
+        }
+        flowsByAccount[accountId].push(flow);
+    });
+    
+    // Find account names from the global accounts array
+    const getAccountName = (accountId) => {
+        const account = accounts.find(a => a.id === accountId);
+        return account ? account.name : accountId.substring(0, 8) + '...';
+    };
+    
+    let html = '';
+    
+    Object.keys(flowsByAccount).forEach(accountId => {
+        const accountFlows = flowsByAccount[accountId];
+        const accountName = getAccountName(accountId);
+        const activeCount = accountFlows.filter(f => f.is_active).length;
+        
+        html += `
+            <div class="flow-account-section" style="margin-bottom: 25px; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden;">
+                <div style="background: rgba(var(--primary-rgb), 0.1); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h3 style="margin: 0; font-size: 16px;">
+                            <i class="fab fa-whatsapp" style="color: #25D366; margin-right: 8px;"></i>
+                            ${accountName}
+                        </h3>
+                        <span style="font-size: 12px; color: var(--text-secondary);">
+                            ${accountFlows.length} flow${accountFlows.length !== 1 ? 's' : ''} • ${activeCount} active
+                        </span>
+                    </div>
+                    <a href="/flow-builder?account=${accountId}" class="btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                        <i class="fas fa-plus"></i> Add Flow
+                    </a>
+                </div>
+                <div style="padding: 15px;">
+        `;
+        
+        accountFlows.forEach(flow => {
+            const triggerBadge = flow.trigger_type === 'keyword' ? 
+                `<span class="badge" style="background: var(--primary); font-size: 10px;">Keywords: ${(flow.trigger_keywords || []).slice(0, 3).join(', ')}</span>` :
+                `<span class="badge" style="background: var(--info); font-size: 10px;">${flow.trigger_type || 'All Messages'}</span>`;
+            
+            const statusColor = flow.is_active ? 'var(--success)' : 'var(--text-secondary)';
+            const statusIcon = flow.is_active ? 'fa-check-circle' : 'fa-pause-circle';
+            const statusText = flow.is_active ? 'Active' : 'Inactive';
+            
+            html += `
+                <div class="flow-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: rgba(255,255,255,0.02); border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border-color);">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                            <span style="font-weight: 600;">${flow.name || 'Unnamed Flow'}</span>
+                            <span style="color: ${statusColor}; font-size: 12px;">
+                                <i class="fas ${statusIcon}"></i> ${statusText}
+                            </span>
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 5px;">
+                            ${flow.description || 'No description'}
+                        </div>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            ${triggerBadge}
+                            ${flow.llm_provider ? `<span class="badge" style="background: var(--secondary); font-size: 10px;"><i class="fas fa-brain"></i> ${flow.llm_provider}</span>` : ''}
+                            ${flow.webhook_url ? `<span class="badge" style="background: var(--warning); font-size: 10px;"><i class="fas fa-link"></i> Webhook</span>` : ''}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <a href="/flow-builder?flow=${flow.id}" class="btn-action" title="Edit Flow" style="background: var(--primary); color: white;">
+                            <i class="fas fa-edit"></i>
+                        </a>
+                        <button class="btn-action ${flow.is_active ? 'warning' : 'success'}" onclick="toggleFlowStatus('${flow.id}', ${!flow.is_active})" title="${flow.is_active ? 'Deactivate' : 'Activate'}">
+                            <i class="fas ${flow.is_active ? 'fa-pause' : 'fa-play'}"></i>
+                        </button>
+                        <button class="btn-action danger" onclick="deleteFlow('${flow.id}')" title="Delete Flow">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += '</div></div>';
+    });
+    
+    flowsList.innerHTML = html;
+    flowsList.style.display = 'block';
+}
+
+async function toggleFlowStatus(flowId, newStatus) {
+    try {
+        const response = await fetch(`/api/chatbot/flows/${flowId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ is_active: newStatus })
+        });
+        
+        if (!response.ok) throw new Error('Failed to update flow');
+        
+        showAlert(`Flow ${newStatus ? 'activated' : 'deactivated'} successfully`, 'success');
+        loadFlowsView(); // Refresh the list
+    } catch (error) {
+        console.error('Error toggling flow status:', error);
+        showAlert('Failed to update flow status', 'error');
+    }
+}
+
+async function deleteFlow(flowId) {
+    if (!confirm('Are you sure you want to delete this flow? This action cannot be undone.')) return;
+    
+    try {
+        const response = await fetch(`/api/chatbot/flows/${flowId}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+        
+        if (!response.ok) throw new Error('Failed to delete flow');
+        
+        showAlert('Flow deleted successfully', 'success');
+        loadFlowsView(); // Refresh the list
+    } catch (error) {
+        console.error('Error deleting flow:', error);
+        showAlert('Failed to delete flow', 'error');
+    }
+}
+
+// ===========================
+// NOTIFICATION SYSTEM
+// ===========================
+
+let notifications = [];
+
+function initNotifications() {
+    // Load stored notifications or set defaults
+    const stored = localStorage.getItem('notifications');
+    if (stored) {
+        try {
+            notifications = JSON.parse(stored);
+        } catch (e) {
+            notifications = [];
+        }
+    }
+    
+    // Add default system notifications if empty
+    if (notifications.length === 0) {
+        notifications = [
+            {
+                id: 'sys_1',
+                type: 'system',
+                icon: 'fa-shield-alt',
+                iconColor: '#ffc107',
+                iconBg: 'linear-gradient(135deg, rgba(255, 193, 7, 0.2), rgba(255, 152, 0, 0.2))',
+                title: 'Anti-Ban Protection Active',
+                desc: 'Rate limits & delays enabled. Daily: 500 msgs/account • 10 msgs/min max',
+                time: 'System',
+                read: false
+            },
+            {
+                id: 'sys_2',
+                type: 'info',
+                icon: 'fa-robot',
+                iconColor: 'var(--primary)',
+                iconBg: 'linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(99, 102, 241, 0.2))',
+                title: 'AI Flow Builder Available',
+                desc: 'Create intelligent conversation flows with LLM-powered data collection.',
+                time: 'Feature',
+                read: false
+            },
+            {
+                id: 'sys_3',
+                type: 'tip',
+                icon: 'fa-lightbulb',
+                iconColor: 'var(--success)',
+                iconBg: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2))',
+                title: 'Typing Indicator Enabled',
+                desc: 'Bot now shows "typing..." before sending messages to reduce ban risk.',
+                time: 'New',
+                read: false
+            }
+        ];
+        saveNotifications();
+    }
+    
+    renderNotifications();
+    updateNotificationBadge();
+}
+
+function saveNotifications() {
+    localStorage.setItem('notifications', JSON.stringify(notifications));
+}
+
+function renderNotifications() {
+    const list = document.getElementById('notificationList');
+    if (!list) return;
+    
+    if (notifications.length === 0) {
+        list.innerHTML = `
+            <div style="text-align: center; padding: 30px; color: var(--text-secondary);">
+                <i class="fas fa-bell-slash" style="font-size: 32px; margin-bottom: 10px;"></i>
+                <p>No notifications</p>
+            </div>
+        `;
+        return;
+    }
+    
+    list.innerHTML = notifications.map(n => `
+        <div class="notification-item ${n.read ? '' : 'unread'}" data-id="${n.id}" data-type="${n.type}">
+            <div class="notification-icon" style="background: ${n.iconBg};">
+                <i class="fas ${n.icon}" style="color: ${n.iconColor};"></i>
+            </div>
+            <div class="notification-content">
+                <div class="notification-title">${n.title}</div>
+                <div class="notification-desc">${n.desc}</div>
+                <span class="notification-time">${n.time}</span>
+            </div>
+            <button class="btn-icon-small" onclick="dismissNotification('${n.id}')" title="Dismiss" style="opacity: 0.5; padding: 5px;">
+                <i class="fas fa-times" style="font-size: 10px;"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+function updateNotificationBadge() {
+    const badge = document.getElementById('notificationBadge');
+    if (!badge) return;
+    
+    const unreadCount = notifications.filter(n => !n.read).length;
+    badge.textContent = unreadCount;
+    badge.style.display = unreadCount > 0 ? 'flex' : 'none';
+}
+
+function addNotification(notification) {
+    const newNotif = {
+        id: 'notif_' + Date.now(),
+        type: notification.type || 'info',
+        icon: notification.icon || 'fa-info-circle',
+        iconColor: notification.iconColor || 'var(--primary)',
+        iconBg: notification.iconBg || 'linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(99, 102, 241, 0.2))',
+        title: notification.title,
+        desc: notification.desc,
+        time: notification.time || 'Just now',
+        read: false
+    };
+    
+    notifications.unshift(newNotif);
+    
+    // Keep only last 20 notifications
+    if (notifications.length > 20) {
+        notifications = notifications.slice(0, 20);
+    }
+    
+    saveNotifications();
+    renderNotifications();
+    updateNotificationBadge();
+}
+
+function dismissNotification(id) {
+    notifications = notifications.filter(n => n.id !== id);
+    saveNotifications();
+    renderNotifications();
+    updateNotificationBadge();
+}
+
+function markAllNotificationsRead() {
+    notifications.forEach(n => n.read = true);
+    saveNotifications();
+    renderNotifications();
+    updateNotificationBadge();
+}
+
+function clearAllNotifications() {
+    if (!confirm('Clear all notifications?')) return;
+    notifications = [];
+    saveNotifications();
+    renderNotifications();
+    updateNotificationBadge();
+}
+
+// Initialize notifications on page load
+document.addEventListener('DOMContentLoaded', function() {
+    initNotifications();
+    
+    // Mark all read button
+    const markAllBtn = document.getElementById('markAllRead');
+    if (markAllBtn) {
+        markAllBtn.addEventListener('click', markAllNotificationsRead);
+    }
+    
+    // Clear all button
+    const clearAllBtn = document.getElementById('clearAllNotifications');
+    if (clearAllBtn) {
+        clearAllBtn.addEventListener('click', clearAllNotifications);
+    }
+});
+
+// ===========================
+// WEBHOOK TEST FUNCTION
+// ===========================
+
+async function testWebhook(webhookId, accountId, webhookUrl) {
+    const btn = event.target.closest('button');
+    const originalContent = btn.innerHTML;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    
+    try {
+        const response = await fetch(`/api/accounts/${accountId}/webhooks/${webhookId}/test`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            showAlert(`Webhook test successful! Response: ${data.statusCode || 200}`, 'success');
+            addNotification({
+                type: 'success',
+                icon: 'fa-check-circle',
+                iconColor: 'var(--success)',
+                iconBg: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2))',
+                title: 'Webhook Test Passed',
+                desc: `${webhookUrl.substring(0, 40)}... responded successfully`,
+                time: 'Just now'
+            });
+        } else {
+            showAlert(`Webhook test failed: ${data.error || 'Unknown error'}`, 'error');
+        }
+    } catch (error) {
+        console.error('Webhook test error:', error);
+        showAlert('Failed to test webhook: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+    }
+}
+

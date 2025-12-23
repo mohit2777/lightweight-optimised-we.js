@@ -33,7 +33,7 @@ class GeminiProvider extends BaseProvider {
         contents: geminiContent,
         generationConfig: {
           temperature: this.config.temperature || 0.7,
-          maxOutputTokens: 800,
+          maxOutputTokens: 500,
         },
         // Relax safety settings to prevent over-blocking in normal conversations
         safetySettings: [
@@ -48,7 +48,7 @@ class GeminiProvider extends BaseProvider {
         payload.systemInstruction = systemInstruction;
       }
 
-      const response = await axios.post(url, payload, { timeout: 30000 });
+      const response = await axios.post(url, payload, { timeout: 15000 });
       
       if (response.data.candidates && response.data.candidates.length > 0) {
         const candidate = response.data.candidates[0];

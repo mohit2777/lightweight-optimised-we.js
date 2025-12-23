@@ -1,14 +1,15 @@
--- Supabase Database Schema for WhatsApp Multi-Automation V2
--- Enhanced with better indexing, partitioning considerations, and data integrity
+-- ============================================================================
+-- WHATSAPP MULTI-AUTOMATION V2 - UNIFIED DATABASE SCHEMA
+-- ============================================================================
+-- Run this file in your new Supabase project to set up the database
+-- Last Updated: 2024-12-23
+-- ============================================================================
 
--- Enable UUID extension
+-- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Enable pg_stat_statements for query performance monitoring (optional)
--- CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
-
 -- ============================================================================
--- TABLES
+-- CORE TABLES
 -- ============================================================================
 
 -- WhatsApp Accounts Table
@@ -18,8 +19,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_accounts (
     description TEXT,
     status VARCHAR(50) DEFAULT 'initializing' CHECK (status IN ('initializing', 'qr_ready', 'ready', 'disconnected', 'auth_failed', 'error')),
     phone_number VARCHAR(50),
-    session_dir VARCHAR(500), -- Legacy column, can be removed later
-    session_data TEXT, -- Base64 encoded WhatsApp Web session data
+    session_data TEXT, -- Base64 encoded WhatsApp Web session data (~12MB)
     last_session_saved TIMESTAMP WITH TIME ZONE,
     qr_code TEXT,
     error_message TEXT,
@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS whatsapp_accounts (
     last_active_at TIMESTAMP WITH TIME ZONE
 );
 
+COMMENT ON TABLE whatsapp_accounts IS 'Stores WhatsApp account information and session data';
 COMMENT ON COLUMN whatsapp_accounts.session_data IS 'Base64 encoded WhatsApp Web session data for persistent authentication';
-COMMENT ON COLUMN whatsapp_accounts.last_session_saved IS 'Timestamp of last session data save';
 
 -- Webhooks Table
 CREATE TABLE IF NOT EXISTS webhooks (
@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS webhooks (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+COMMENT ON TABLE webhooks IS 'Webhook configurations for message forwarding';
 
 -- Message Logs Table
 CREATE TABLE IF NOT EXISTS message_logs (
@@ -73,7 +75,9 @@ CREATE TABLE IF NOT EXISTS message_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Webhook Delivery Queue (durable delivery + retries)
+COMMENT ON TABLE message_logs IS 'Message activity logs (can be disabled via DISABLE_MESSAGE_LOGGING env var)';
+
+-- Webhook Delivery Queue
 CREATE TABLE IF NOT EXISTS webhook_delivery_queue (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
@@ -91,14 +95,15 @@ CREATE TABLE IF NOT EXISTS webhook_delivery_queue (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- AI Auto Reply Configuration Table (per WhatsApp account)
+COMMENT ON TABLE webhook_delivery_queue IS 'Durable webhook delivery queue with retries';
+
+-- AI Auto Reply Configuration
 CREATE TABLE IF NOT EXISTS ai_auto_replies (
     account_id UUID PRIMARY KEY REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
     provider TEXT NOT NULL,
     api_key TEXT,
     model TEXT,
     system_prompt TEXT,
-    -- Number of past messages to include in context (RAG-like memory)
     history_limit INTEGER DEFAULT 10,
     temperature NUMERIC DEFAULT 0.7,
     is_active BOOLEAN DEFAULT false,
@@ -106,8 +111,10 @@ CREATE TABLE IF NOT EXISTS ai_auto_replies (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+COMMENT ON TABLE ai_auto_replies IS 'Per-account AI chatbot configuration';
+
 -- ============================================================================
--- CHATBOT FLOWS (Visual Flow Builder with AI Support)
+-- CHATBOT FLOWS (Visual Flow Builder)
 -- ============================================================================
 
 -- Chatbot Flows Table
@@ -119,14 +126,18 @@ CREATE TABLE IF NOT EXISTS chatbot_flows (
     trigger_type VARCHAR(50) DEFAULT 'keyword' CHECK (trigger_type IN ('keyword', 'all', 'regex', 'exact')),
     trigger_keywords TEXT[] DEFAULT '{}',
     is_active BOOLEAN DEFAULT true,
-    -- Flow Type: 'basic' for traditional flows, 'ai' for AI-powered data extraction
     flow_type VARCHAR(20) DEFAULT 'basic' CHECK (flow_type IN ('basic', 'ai')),
-    -- LLM Configuration for AI flows
-    llm_provider VARCHAR(50), -- 'groq', 'openrouter', 'gemini'
-    llm_api_key TEXT, -- Encrypted API key
-    llm_model VARCHAR(255), -- Model identifier
-    llm_instructions TEXT, -- Custom instructions for AI behavior
-    -- Webhook for immediate data delivery
+    -- LLM Configuration
+    llm_provider VARCHAR(50),
+    llm_api_key TEXT,
+    llm_model VARCHAR(255),
+    llm_instructions TEXT,
+    llm_temperature DECIMAL(3,2) DEFAULT 0.7,
+    llm_persona TEXT,
+    -- Knowledge base for AI
+    knowledge_base TEXT,
+    use_shared_memory BOOLEAN DEFAULT false,
+    -- Webhook for data delivery
     webhook_url TEXT,
     webhook_headers JSONB DEFAULT '{}',
     -- Timestamps
@@ -134,13 +145,7 @@ CREATE TABLE IF NOT EXISTS chatbot_flows (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-COMMENT ON TABLE chatbot_flows IS 'Stores chatbot flow configurations including AI-powered data extraction flows';
-COMMENT ON COLUMN chatbot_flows.flow_type IS 'Type of flow: basic (traditional) or ai (AI-powered data extraction)';
-COMMENT ON COLUMN chatbot_flows.llm_provider IS 'LLM provider for AI flows: groq, openrouter, or gemini';
-COMMENT ON COLUMN chatbot_flows.llm_api_key IS 'API key for the LLM provider';
-COMMENT ON COLUMN chatbot_flows.llm_model IS 'Specific model to use from the LLM provider';
-COMMENT ON COLUMN chatbot_flows.llm_instructions IS 'Custom instructions to guide AI behavior and personality';
-COMMENT ON COLUMN chatbot_flows.webhook_url IS 'URL to send collected data immediately upon flow completion';
+COMMENT ON TABLE chatbot_flows IS 'Visual chatbot flow configurations';
 
 -- Flow Nodes Table
 CREATE TABLE IF NOT EXISTS flow_nodes (
@@ -154,7 +159,7 @@ CREATE TABLE IF NOT EXISTS flow_nodes (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-COMMENT ON TABLE flow_nodes IS 'Individual nodes in a chatbot flow (start, message, ai_question, condition, etc.)';
+COMMENT ON TABLE flow_nodes IS 'Individual nodes in a chatbot flow';
 
 -- Flow Connections Table
 CREATE TABLE IF NOT EXISTS flow_connections (
@@ -167,9 +172,9 @@ CREATE TABLE IF NOT EXISTS flow_connections (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-COMMENT ON TABLE flow_connections IS 'Connections between nodes defining the flow path';
+COMMENT ON TABLE flow_connections IS 'Connections between flow nodes';
 
--- Chatbot Conversation State Table
+-- Chatbot Conversations (Active State)
 CREATE TABLE IF NOT EXISTS chatbot_conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     flow_id UUID REFERENCES chatbot_flows(id) ON DELETE CASCADE,
@@ -182,9 +187,9 @@ CREATE TABLE IF NOT EXISTS chatbot_conversations (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-COMMENT ON TABLE chatbot_conversations IS 'Active conversation state for users in chatbot flows';
+COMMENT ON TABLE chatbot_conversations IS 'Active conversation state tracking';
 
--- AI Flow Completions Table (Track completed AI flows for analytics)
+-- AI Flow Completions (Analytics)
 CREATE TABLE IF NOT EXISTS ai_flow_completions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     flow_id UUID REFERENCES chatbot_flows(id) ON DELETE SET NULL,
@@ -199,59 +204,104 @@ CREATE TABLE IF NOT EXISTS ai_flow_completions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-COMMENT ON TABLE ai_flow_completions IS 'Records of completed AI flows with collected data for analytics';
+COMMENT ON TABLE ai_flow_completions IS 'Completed AI flow records for analytics';
 
 -- ============================================================================
--- SAFE MIGRATIONS (Ensure columns exist if tables were already created)
+-- LEAD CAPTURE WORKFLOWS
 -- ============================================================================
 
--- Ensure whatsapp_accounts has all required columns
-ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS session_data TEXT;
-ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS last_session_saved TIMESTAMP WITH TIME ZONE;
-ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS qr_code TEXT;
-ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS error_message TEXT;
+-- Lead Workflows Table
+CREATE TABLE IF NOT EXISTS lead_workflows (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    nodes JSONB DEFAULT '[]',
+    edges JSONB DEFAULT '[]',
+    welcome_message TEXT,
+    completion_message TEXT,
+    completion_webhook_url VARCHAR(500),
+    completion_webhook_secret VARCHAR(255),
+    is_active BOOLEAN DEFAULT false,
+    priority INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
--- Ensure message_logs has all required columns
-ALTER TABLE message_logs ADD COLUMN IF NOT EXISTS webhook_id UUID REFERENCES webhooks(id) ON DELETE SET NULL;
-ALTER TABLE message_logs ADD COLUMN IF NOT EXISTS webhook_url VARCHAR(500);
-ALTER TABLE message_logs ADD COLUMN IF NOT EXISTS response_status INTEGER;
-ALTER TABLE message_logs ADD COLUMN IF NOT EXISTS processing_time_ms INTEGER;
-ALTER TABLE message_logs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+COMMENT ON TABLE lead_workflows IS 'Visual workflow definitions for lead capture';
 
--- Ensure webhooks has all required columns
-ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
-ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMP WITH TIME ZONE;
-ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMP WITH TIME ZONE;
+-- Lead Sessions Table
+CREATE TABLE IF NOT EXISTS lead_sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+    workflow_id UUID NOT NULL REFERENCES lead_workflows(id) ON DELETE CASCADE,
+    contact_id VARCHAR(255) NOT NULL,
+    current_node_id VARCHAR(255),
+    collected_data JSONB DEFAULT '{}',
+    conversation_history JSONB DEFAULT '[]',
+    status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'completed', 'abandoned', 'expired')),
+    ai_fallback_active BOOLEAN DEFAULT false,
+    ai_fallback_context TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE
+);
 
--- Ensure ai_auto_replies provider check constraint is removed to allow any provider
-DO $$ 
-BEGIN 
-    ALTER TABLE ai_auto_replies DROP CONSTRAINT IF EXISTS ai_auto_replies_provider_check;
-EXCEPTION
-    WHEN undefined_table THEN 
-        NULL; -- Table might not exist yet, which is fine
-END $$;
+COMMENT ON TABLE lead_sessions IS 'Active and historical lead capture sessions';
 
--- Ensure ai_auto_replies has `history_limit` column
-ALTER TABLE ai_auto_replies ADD COLUMN IF NOT EXISTS history_limit INTEGER DEFAULT 10;
+-- Lead Data Table
+CREATE TABLE IF NOT EXISTS lead_data (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+    session_id UUID REFERENCES lead_sessions(id) ON DELETE SET NULL,
+    workflow_id UUID REFERENCES lead_workflows(id) ON DELETE SET NULL,
+    contact_id VARCHAR(255) NOT NULL,
+    data JSONB NOT NULL DEFAULT '{}',
+    name VARCHAR(255),
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    score INTEGER DEFAULT 0,
+    tags JSONB DEFAULT '[]',
+    status VARCHAR(50) DEFAULT 'new' CHECK (status IN ('new', 'contacted', 'qualified', 'converted', 'lost')),
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+COMMENT ON TABLE lead_data IS 'Completed lead information';
 
 -- ============================================================================
--- INDEXES for Performance Optimization
+-- EXPRESS SESSION TABLE (For Render/Cloud deployments)
 -- ============================================================================
 
--- WhatsApp Accounts Indexes
+CREATE TABLE IF NOT EXISTS "session" (
+    "sid" VARCHAR NOT NULL COLLATE "default",
+    "sess" JSON NOT NULL,
+    "expire" TIMESTAMP(6) NOT NULL,
+    CONSTRAINT "session_pkey" PRIMARY KEY ("sid") NOT DEFERRABLE INITIALLY IMMEDIATE
+);
+
+CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+
+COMMENT ON TABLE session IS 'Express session storage for cloud deployments';
+
+-- ============================================================================
+-- INDEXES FOR PERFORMANCE
+-- ============================================================================
+
+-- WhatsApp Accounts
 CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_status ON whatsapp_accounts(status);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_created_at ON whatsapp_accounts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_phone_number ON whatsapp_accounts(phone_number) WHERE phone_number IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_last_active ON whatsapp_accounts(last_active_at DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_session_data ON whatsapp_accounts(id) WHERE session_data IS NOT NULL;
 
--- Webhooks Indexes
+-- Webhooks
 CREATE INDEX IF NOT EXISTS idx_webhooks_account_id ON webhooks(account_id);
 CREATE INDEX IF NOT EXISTS idx_webhooks_is_active ON webhooks(is_active) WHERE is_active = true;
 CREATE INDEX IF NOT EXISTS idx_webhooks_account_active ON webhooks(account_id, is_active) WHERE is_active = true;
 
--- Message Logs Indexes (optimized for common queries)
+-- Message Logs (optimized for common queries)
 CREATE INDEX IF NOT EXISTS idx_message_logs_account_id ON message_logs(account_id);
 CREATE INDEX IF NOT EXISTS idx_message_logs_direction ON message_logs(direction);
 CREATE INDEX IF NOT EXISTS idx_message_logs_status ON message_logs(status);
@@ -260,26 +310,23 @@ CREATE INDEX IF NOT EXISTS idx_message_logs_account_created ON message_logs(acco
 CREATE INDEX IF NOT EXISTS idx_message_logs_webhook_id ON message_logs(webhook_id) WHERE webhook_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_message_logs_chat_id ON message_logs(chat_id) WHERE chat_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_message_logs_message_id ON message_logs(message_id) WHERE message_id IS NOT NULL;
-
--- Composite indexes for stats queries (CRITICAL for performance)
 CREATE INDEX IF NOT EXISTS idx_message_logs_account_direction ON message_logs(account_id, direction);
 CREATE INDEX IF NOT EXISTS idx_message_logs_account_status ON message_logs(account_id, status);
 CREATE INDEX IF NOT EXISTS idx_message_logs_account_direction_status ON message_logs(account_id, direction, status);
--- Index for daily stats aggregation
 CREATE INDEX IF NOT EXISTS idx_message_logs_daily_stats ON message_logs(created_at, direction) WHERE sender != 'status@broadcast';
--- Index for conversation history
 CREATE INDEX IF NOT EXISTS idx_message_logs_conversation ON message_logs(account_id, sender, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_message_logs_recipient ON message_logs(account_id, recipient, created_at DESC);
 
+-- Webhook Delivery Queue
 CREATE INDEX IF NOT EXISTS idx_webhook_delivery_status ON webhook_delivery_queue(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_webhook_delivery_account ON webhook_delivery_queue(account_id);
 CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_queue(webhook_id);
 
--- Chatbots Indexes
+-- AI Auto Replies
 CREATE INDEX IF NOT EXISTS idx_ai_auto_replies_account_id ON ai_auto_replies(account_id);
 CREATE INDEX IF NOT EXISTS idx_ai_auto_replies_is_active ON ai_auto_replies(is_active) WHERE is_active = true;
 
--- Chatbot Flows Indexes
+-- Chatbot Flows
 CREATE INDEX IF NOT EXISTS idx_chatbot_flows_account_id ON chatbot_flows(account_id);
 CREATE INDEX IF NOT EXISTS idx_chatbot_flows_is_active ON chatbot_flows(is_active);
 CREATE INDEX IF NOT EXISTS idx_chatbot_flows_flow_type ON chatbot_flows(flow_type);
@@ -293,59 +340,63 @@ CREATE INDEX IF NOT EXISTS idx_ai_flow_completions_account_id ON ai_flow_complet
 CREATE INDEX IF NOT EXISTS idx_ai_flow_completions_flow_id ON ai_flow_completions(flow_id);
 CREATE INDEX IF NOT EXISTS idx_ai_flow_completions_completed_at ON ai_flow_completions(completed_at DESC);
 
+-- Lead Workflows
+CREATE INDEX IF NOT EXISTS idx_lead_workflows_account_id ON lead_workflows(account_id);
+CREATE INDEX IF NOT EXISTS idx_lead_workflows_is_active ON lead_workflows(is_active) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_lead_workflows_account_active ON lead_workflows(account_id, is_active) WHERE is_active = true;
+
+-- Lead Sessions
+CREATE INDEX IF NOT EXISTS idx_lead_sessions_account_id ON lead_sessions(account_id);
+CREATE INDEX IF NOT EXISTS idx_lead_sessions_workflow_id ON lead_sessions(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_lead_sessions_contact_id ON lead_sessions(contact_id);
+CREATE INDEX IF NOT EXISTS idx_lead_sessions_account_contact ON lead_sessions(account_id, contact_id);
+CREATE INDEX IF NOT EXISTS idx_lead_sessions_status ON lead_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_lead_sessions_active ON lead_sessions(account_id, contact_id, status) WHERE status = 'active';
+
+-- Lead Data
+CREATE INDEX IF NOT EXISTS idx_lead_data_account_id ON lead_data(account_id);
+CREATE INDEX IF NOT EXISTS idx_lead_data_contact_id ON lead_data(contact_id);
+CREATE INDEX IF NOT EXISTS idx_lead_data_status ON lead_data(status);
+CREATE INDEX IF NOT EXISTS idx_lead_data_created_at ON lead_data(created_at DESC);
+
 -- ============================================================================
--- ROW LEVEL SECURITY (RLS) Policies
+-- ROW LEVEL SECURITY (RLS)
 -- ============================================================================
 
 ALTER TABLE whatsapp_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhooks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_auto_replies ENABLE ROW LEVEL SECURITY;
-
--- Allow all operations (customize based on your security needs)
-DROP POLICY IF EXISTS "Allow all operations on whatsapp_accounts" ON whatsapp_accounts;
-CREATE POLICY "Allow all operations on whatsapp_accounts" ON whatsapp_accounts
-    FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on webhooks" ON webhooks;
-CREATE POLICY "Allow all operations on webhooks" ON webhooks
-    FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on message_logs" ON message_logs;
-CREATE POLICY "Allow all operations on message_logs" ON message_logs
-    FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on ai_auto_replies" ON ai_auto_replies;
-CREATE POLICY "Allow all operations on ai_auto_replies" ON ai_auto_replies
-    FOR ALL USING (true);
-
--- Chatbot Flows RLS
 ALTER TABLE chatbot_flows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE flow_nodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE flow_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chatbot_conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_flow_completions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_workflows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_delivery_queue ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Allow all operations on chatbot_flows" ON chatbot_flows;
+-- Allow all operations (customize based on your auth needs)
+CREATE POLICY "Allow all operations on whatsapp_accounts" ON whatsapp_accounts FOR ALL USING (true);
+CREATE POLICY "Allow all operations on webhooks" ON webhooks FOR ALL USING (true);
+CREATE POLICY "Allow all operations on message_logs" ON message_logs FOR ALL USING (true);
+CREATE POLICY "Allow all operations on ai_auto_replies" ON ai_auto_replies FOR ALL USING (true);
 CREATE POLICY "Allow all operations on chatbot_flows" ON chatbot_flows FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on flow_nodes" ON flow_nodes;
 CREATE POLICY "Allow all operations on flow_nodes" ON flow_nodes FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on flow_connections" ON flow_connections;
 CREATE POLICY "Allow all operations on flow_connections" ON flow_connections FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on chatbot_conversations" ON chatbot_conversations;
 CREATE POLICY "Allow all operations on chatbot_conversations" ON chatbot_conversations FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on ai_flow_completions" ON ai_flow_completions;
 CREATE POLICY "Allow all operations on ai_flow_completions" ON ai_flow_completions FOR ALL USING (true);
+CREATE POLICY "Allow all operations on lead_workflows" ON lead_workflows FOR ALL USING (true);
+CREATE POLICY "Allow all operations on lead_sessions" ON lead_sessions FOR ALL USING (true);
+CREATE POLICY "Allow all operations on lead_data" ON lead_data FOR ALL USING (true);
+CREATE POLICY "Allow all operations on webhook_delivery_queue" ON webhook_delivery_queue FOR ALL USING (true);
 
 -- ============================================================================
 -- FUNCTIONS
 -- ============================================================================
 
--- Function for automatic timestamp updates
+-- Auto-update timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -354,7 +405,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to get comprehensive message statistics
+-- Get message stats for an account
 CREATE OR REPLACE FUNCTION get_message_stats(account_uuid UUID)
 RETURNS TABLE(
     total BIGINT,
@@ -382,56 +433,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to get recent messages with pagination
-CREATE OR REPLACE FUNCTION get_recent_messages(
-    account_uuid UUID, 
-    limit_count INTEGER DEFAULT 100,
-    offset_count INTEGER DEFAULT 0
-)
-RETURNS TABLE(
-    id UUID,
-    direction VARCHAR(50),
-    message TEXT,
-    sender VARCHAR(255),
-    recipient VARCHAR(255),
-    status VARCHAR(50),
-    type VARCHAR(50),
-    created_at TIMESTAMP WITH TIME ZONE
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        ml.id,
-        ml.direction,
-        ml.message,
-        ml.sender,
-        ml.recipient,
-        ml.status,
-        ml.type,
-        ml.created_at
-    FROM message_logs ml
-    WHERE ml.account_id = account_uuid
-    ORDER BY ml.created_at DESC
-    LIMIT limit_count
-    OFFSET offset_count;
-END;
-$$ LANGUAGE plpgsql;
-
--- Function to clean old message logs (for data retention)
-CREATE OR REPLACE FUNCTION cleanup_old_messages(days_to_keep INTEGER DEFAULT 90)
-RETURNS INTEGER AS $$
-DECLARE
-    deleted_count INTEGER;
-BEGIN
-    DELETE FROM message_logs
-    WHERE created_at < NOW() - (days_to_keep || ' days')::INTERVAL;
-    
-    GET DIAGNOSTICS deleted_count = ROW_COUNT;
-    RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql;
-
--- Function to get all accounts stats in a single query (avoids N+1 problem)
+-- Get all accounts stats (avoids N+1)
 CREATE OR REPLACE FUNCTION get_all_accounts_stats()
 RETURNS TABLE(
     account_id UUID,
@@ -458,7 +460,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to get daily message stats using PostgreSQL aggregation (much faster than JS processing)
+-- Get daily message stats
 CREATE OR REPLACE FUNCTION get_daily_message_stats(days_count INTEGER DEFAULT 7)
 RETURNS TABLE(
     date DATE,
@@ -481,77 +483,46 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to get webhook statistics
-CREATE OR REPLACE FUNCTION get_webhook_stats(webhook_uuid UUID)
-RETURNS TABLE(
-    total_deliveries BIGINT,
-    successful_deliveries BIGINT,
-    failed_deliveries BIGINT,
-    avg_response_time_ms NUMERIC,
-    last_success TIMESTAMP WITH TIME ZONE,
-    last_failure TIMESTAMP WITH TIME ZONE
-) AS $$
+-- Cleanup old messages (data retention)
+CREATE OR REPLACE FUNCTION cleanup_old_messages(days_to_keep INTEGER DEFAULT 90)
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
 BEGIN
-    RETURN QUERY
-    SELECT 
-        COUNT(*) as total_deliveries,
-        COUNT(*) FILTER (WHERE status = 'success') as successful_deliveries,
-        COUNT(*) FILTER (WHERE status = 'failed') as failed_deliveries,
-        AVG(processing_time_ms) FILTER (WHERE processing_time_ms IS NOT NULL) as avg_response_time_ms,
-        MAX(created_at) FILTER (WHERE status = 'success') as last_success,
-        MAX(created_at) FILTER (WHERE status = 'failed') as last_failure
-    FROM message_logs
-    WHERE webhook_id = webhook_uuid;
+    DELETE FROM message_logs
+    WHERE created_at < NOW() - (days_to_keep || ' days')::INTERVAL;
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
 END;
 $$ LANGUAGE plpgsql;
 
--- Session Data Functions
-
--- Function to save session data
-CREATE OR REPLACE FUNCTION save_session_data(
-  p_account_id UUID,
-  p_session_data TEXT
-)
+-- Session data functions
+CREATE OR REPLACE FUNCTION save_session_data(p_account_id UUID, p_session_data TEXT)
 RETURNS BOOLEAN AS $$
 BEGIN
-  UPDATE whatsapp_accounts
-  SET 
-    session_data = p_session_data,
-    last_session_saved = NOW(),
-    updated_at = NOW()
-  WHERE id = p_account_id;
-  
-  RETURN FOUND;
+    UPDATE whatsapp_accounts
+    SET session_data = p_session_data, last_session_saved = NOW(), updated_at = NOW()
+    WHERE id = p_account_id;
+    RETURN FOUND;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Function to get session data
 CREATE OR REPLACE FUNCTION get_session_data(p_account_id UUID)
 RETURNS TEXT AS $$
-DECLARE
-  v_session_data TEXT;
+DECLARE v_session_data TEXT;
 BEGIN
-  SELECT session_data INTO v_session_data
-  FROM whatsapp_accounts
-  WHERE id = p_account_id;
-  
-  RETURN v_session_data;
+    SELECT session_data INTO v_session_data FROM whatsapp_accounts WHERE id = p_account_id;
+    RETURN v_session_data;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Function to clear session data (for logout/disconnect)
 CREATE OR REPLACE FUNCTION clear_session_data(p_account_id UUID)
 RETURNS BOOLEAN AS $$
 BEGIN
-  UPDATE whatsapp_accounts
-  SET 
-    session_data = NULL,
-    last_session_saved = NULL,
-    status = 'disconnected',
-    updated_at = NOW()
-  WHERE id = p_account_id;
-  
-  RETURN FOUND;
+    UPDATE whatsapp_accounts
+    SET session_data = NULL, last_session_saved = NULL, status = 'disconnected', updated_at = NOW()
+    WHERE id = p_account_id;
+    RETURN FOUND;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -559,170 +530,47 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- TRIGGERS
 -- ============================================================================
 
--- Triggers for automatic timestamp updates
-DROP TRIGGER IF EXISTS update_whatsapp_accounts_updated_at ON whatsapp_accounts;
 CREATE TRIGGER update_whatsapp_accounts_updated_at 
     BEFORE UPDATE ON whatsapp_accounts 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS update_webhooks_updated_at ON webhooks;
 CREATE TRIGGER update_webhooks_updated_at 
     BEFORE UPDATE ON webhooks 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS update_webhook_queue_updated_at ON webhook_delivery_queue;
 CREATE TRIGGER update_webhook_queue_updated_at
     BEFORE UPDATE ON webhook_delivery_queue
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS update_ai_auto_replies_updated_at ON ai_auto_replies;
 CREATE TRIGGER update_ai_auto_replies_updated_at 
     BEFORE UPDATE ON ai_auto_replies 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ============================================================================
--- LEAD CAPTURE WORKFLOWS & SESSIONS
--- ============================================================================
+CREATE TRIGGER update_chatbot_flows_updated_at 
+    BEFORE UPDATE ON chatbot_flows 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Lead Capture Workflows Table
-CREATE TABLE IF NOT EXISTS lead_workflows (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    -- Workflow nodes and edges stored as JSONB (flexible for visual editor)
-    nodes JSONB DEFAULT '[]',
-    edges JSONB DEFAULT '[]',
-    -- Workflow settings
-    welcome_message TEXT,
-    completion_message TEXT,
-    -- Webhook to call when lead capture is complete
-    completion_webhook_url VARCHAR(500),
-    completion_webhook_secret VARCHAR(255),
-    -- Workflow state
-    is_active BOOLEAN DEFAULT false,
-    priority INTEGER DEFAULT 0,
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+CREATE TRIGGER update_chatbot_conversations_updated_at 
+    BEFORE UPDATE ON chatbot_conversations 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-COMMENT ON TABLE lead_workflows IS 'Visual workflow definitions for lead capture and qualification';
-COMMENT ON COLUMN lead_workflows.nodes IS 'Array of workflow nodes [{id, type, position, data}]';
-COMMENT ON COLUMN lead_workflows.edges IS 'Array of connections between nodes [{id, source, target, sourceHandle, targetHandle}]';
-
--- Lead Sessions Table (active conversations in a workflow)
-CREATE TABLE IF NOT EXISTS lead_sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
-    workflow_id UUID NOT NULL REFERENCES lead_workflows(id) ON DELETE CASCADE,
-    contact_id VARCHAR(255) NOT NULL, -- WhatsApp contact ID
-    -- Current state
-    current_node_id VARCHAR(255),
-    collected_data JSONB DEFAULT '{}',
-    conversation_history JSONB DEFAULT '[]',
-    -- Status tracking
-    status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'completed', 'abandoned', 'expired')),
-    -- AI fallback state
-    ai_fallback_active BOOLEAN DEFAULT false,
-    ai_fallback_context TEXT,
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    completed_at TIMESTAMP WITH TIME ZONE
-);
-
-COMMENT ON TABLE lead_sessions IS 'Active and historical lead capture sessions';
-COMMENT ON COLUMN lead_sessions.collected_data IS 'Data collected from user during workflow execution';
-COMMENT ON COLUMN lead_sessions.conversation_history IS 'Full conversation history during lead capture';
-
--- Lead Data Table (completed leads for export/CRM integration)
-CREATE TABLE IF NOT EXISTS lead_data (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
-    session_id UUID REFERENCES lead_sessions(id) ON DELETE SET NULL,
-    workflow_id UUID REFERENCES lead_workflows(id) ON DELETE SET NULL,
-    contact_id VARCHAR(255) NOT NULL,
-    -- Collected information (flattened from session)
-    data JSONB NOT NULL DEFAULT '{}',
-    -- Contact info (extracted for convenience)
-    name VARCHAR(255),
-    email VARCHAR(255),
-    phone VARCHAR(50),
-    -- Lead qualification
-    score INTEGER DEFAULT 0,
-    tags JSONB DEFAULT '[]',
-    -- Status
-    status VARCHAR(50) DEFAULT 'new' CHECK (status IN ('new', 'contacted', 'qualified', 'converted', 'lost')),
-    notes TEXT,
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-COMMENT ON TABLE lead_data IS 'Completed lead information for CRM integration and follow-up';
-
--- Indexes for Lead Workflows
-CREATE INDEX IF NOT EXISTS idx_lead_workflows_account_id ON lead_workflows(account_id);
-CREATE INDEX IF NOT EXISTS idx_lead_workflows_is_active ON lead_workflows(is_active) WHERE is_active = true;
-CREATE INDEX IF NOT EXISTS idx_lead_workflows_account_active ON lead_workflows(account_id, is_active) WHERE is_active = true;
-
--- Indexes for Lead Sessions
-CREATE INDEX IF NOT EXISTS idx_lead_sessions_account_id ON lead_sessions(account_id);
-CREATE INDEX IF NOT EXISTS idx_lead_sessions_workflow_id ON lead_sessions(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_lead_sessions_contact_id ON lead_sessions(contact_id);
-CREATE INDEX IF NOT EXISTS idx_lead_sessions_account_contact ON lead_sessions(account_id, contact_id);
-CREATE INDEX IF NOT EXISTS idx_lead_sessions_status ON lead_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_lead_sessions_active ON lead_sessions(account_id, contact_id, status) WHERE status = 'active';
-
--- Indexes for Lead Data
-CREATE INDEX IF NOT EXISTS idx_lead_data_account_id ON lead_data(account_id);
-CREATE INDEX IF NOT EXISTS idx_lead_data_contact_id ON lead_data(contact_id);
-CREATE INDEX IF NOT EXISTS idx_lead_data_status ON lead_data(status);
-CREATE INDEX IF NOT EXISTS idx_lead_data_created_at ON lead_data(created_at DESC);
-
--- Update triggers for lead tables
-DROP TRIGGER IF EXISTS update_lead_workflows_updated_at ON lead_workflows;
 CREATE TRIGGER update_lead_workflows_updated_at 
     BEFORE UPDATE ON lead_workflows 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS update_lead_sessions_updated_at ON lead_sessions;
 CREATE TRIGGER update_lead_sessions_updated_at 
     BEFORE UPDATE ON lead_sessions 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS update_lead_data_updated_at ON lead_data;
 CREATE TRIGGER update_lead_data_updated_at 
     BEFORE UPDATE ON lead_data 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
-
--- RLS Policies for Lead Tables
-ALTER TABLE lead_workflows ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lead_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lead_data ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Allow all operations on lead_workflows" ON lead_workflows;
-CREATE POLICY "Allow all operations on lead_workflows" ON lead_workflows FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on lead_sessions" ON lead_sessions;
-CREATE POLICY "Allow all operations on lead_sessions" ON lead_sessions FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Allow all operations on lead_data" ON lead_data;
-CREATE POLICY "Allow all operations on lead_data" ON lead_data FOR ALL USING (true);
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
--- VIEWS for Common Queries
+-- VIEWS
 -- ============================================================================
 
--- View for active accounts with recent activity
+-- Active accounts summary
 CREATE OR REPLACE VIEW active_accounts_summary AS
 SELECT 
     wa.id,
@@ -738,7 +586,7 @@ LEFT JOIN webhooks w ON wa.id = w.account_id
 LEFT JOIN message_logs ml ON wa.id = ml.account_id
 GROUP BY wa.id, wa.name, wa.status, wa.phone_number, wa.last_active_at;
 
--- View for webhook delivery statistics
+-- Webhook delivery stats
 CREATE OR REPLACE VIEW webhook_delivery_stats AS
 SELECT 
     w.id,
@@ -755,16 +603,7 @@ LEFT JOIN message_logs ml ON w.id = ml.webhook_id
 GROUP BY w.id, w.account_id, w.url, w.is_active;
 
 -- ============================================================================
--- COMMENTS for Documentation
+-- REFRESH SCHEMA CACHE (Supabase specific)
 -- ============================================================================
 
-COMMENT ON TABLE whatsapp_accounts IS 'Stores WhatsApp account information and connection status';
-COMMENT ON TABLE webhooks IS 'Stores webhook configurations for receiving message notifications';
-COMMENT ON TABLE message_logs IS 'Stores all message activity, webhook deliveries, and processing logs';
-COMMENT ON TABLE ai_auto_replies IS 'Stores per-account AI auto reply configuration. Supported providers: gemini, groq, mistral, sambanova, huggingface, openrouter';
-COMMENT ON COLUMN ai_auto_replies.history_limit IS 'Number of past messages to include in the AI context window';
-COMMENT ON COLUMN ai_auto_replies.provider IS 'AI provider: gemini (Google), groq (Fast LPU), mistral, sambanova, huggingface, openrouter';
-COMMENT ON FUNCTION get_message_stats(UUID) IS 'Returns comprehensive message statistics for a specific account';
-COMMENT ON FUNCTION get_recent_messages(UUID, INTEGER, INTEGER) IS 'Returns recent messages for a specific account with pagination support';
-COMMENT ON FUNCTION cleanup_old_messages(INTEGER) IS 'Removes message logs older than specified days for data retention';
-COMMENT ON FUNCTION get_webhook_stats(UUID) IS 'Returns delivery statistics for a specific webhook';
+NOTIFY pgrst, 'reload schema';

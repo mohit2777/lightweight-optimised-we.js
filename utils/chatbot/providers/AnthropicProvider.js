@@ -17,7 +17,7 @@ class AnthropicProvider extends BaseProvider {
           role: m.role,
           content: m.content
         })),
-        max_tokens: 1024,
+        max_tokens: 500,
         temperature: this.config.temperature || 0.7
       };
 
@@ -30,7 +30,7 @@ class AnthropicProvider extends BaseProvider {
             'anthropic-version': '2023-06-01',
             'Content-Type': 'application/json'
           },
-          timeout: 30000
+          timeout: 15000
         }
       );
 

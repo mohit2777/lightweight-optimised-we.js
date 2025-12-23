@@ -33,11 +33,11 @@ class OpenAIProvider extends BaseProvider {
       // Add parameters based on model type
       if (isReasoning) {
         // Reasoning models use max_completion_tokens and don't support temperature
-        payload.max_completion_tokens = 2000; 
+        payload.max_completion_tokens = 1000; 
       } else {
         // Standard models
         payload.temperature = this.config.temperature || 0.7;
-        payload.max_tokens = 800;
+        payload.max_tokens = 500;
       }
 
       const response = await axios.post(
@@ -48,7 +48,7 @@ class OpenAIProvider extends BaseProvider {
             'Authorization': `Bearer ${this.config.api_key}`,
             'Content-Type': 'application/json'
           },
-          timeout: 30000
+          timeout: 15000
         }
       );
 

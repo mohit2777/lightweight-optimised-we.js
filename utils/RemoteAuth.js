@@ -7,12 +7,121 @@
 const { db } = require('../config/database');
 const logger = require('./logger');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const BaseAuthStrategy = require('whatsapp-web.js/src/authStrategies/BaseAuthStrategy');
 const zlib = require('zlib');
 const util = require('util');
 const gzip = util.promisify(zlib.gzip);
 const gunzip = util.promisify(zlib.gunzip);
+
+/**
+ * Pre-restore session files from database BEFORE client initialization
+ * This is called from whatsappManager BEFORE creating the Client
+ * @param {string} accountId - The account ID
+ * @param {string} dataPath - Base path for session storage
+ * @returns {Promise<{restored: boolean, sessionPath: string}>}
+ */
+async function preRestoreSession(accountId, dataPath = './wa-sessions-temp') {
+  const sessionPath = path.join(dataPath, accountId);
+  
+  try {
+    // Create directories
+    await fs.mkdir(dataPath, { recursive: true });
+    await fs.mkdir(sessionPath, { recursive: true });
+    
+    logger.info(`[PreRestore] Checking session for: ${accountId}`);
+    
+    const sessionData = await db.getSessionData(accountId);
+    
+    if (!sessionData) {
+      logger.info(`[PreRestore] No session found in database for: ${accountId}`);
+      return { restored: false, sessionPath };
+    }
+
+    const payloadJson = Buffer.from(sessionData, 'base64').toString('utf-8');
+    let payloadObj;
+    
+    try {
+      payloadObj = JSON.parse(payloadJson);
+    } catch (e) {
+      logger.error('[PreRestore] Failed to parse session payload');
+      return { restored: false, sessionPath };
+    }
+
+    let files;
+
+    // Handle V2 (Compressed)
+    if (payloadObj.type === 'folder_dump_v2' && payloadObj.data) {
+      try {
+        const compressedBuffer = Buffer.from(payloadObj.data, 'base64');
+        const decompressed = await gunzip(compressedBuffer);
+        const sessionObj = JSON.parse(decompressed.toString('utf-8'));
+        files = sessionObj.files;
+      } catch (err) {
+        logger.error('[PreRestore] Decompression failed:', err);
+        return { restored: false, sessionPath };
+      }
+    } 
+    // Handle V1 (Uncompressed)
+    else if (payloadObj.type === 'folder_dump') {
+      files = payloadObj.files;
+    } 
+    // Handle Legacy/Unknown
+    else {
+      logger.warn('[PreRestore] Unknown session format, cannot restore');
+      return { restored: false, sessionPath };
+    }
+
+    if (!files || Object.keys(files).length === 0) {
+      logger.warn('[PreRestore] No files found in session data');
+      return { restored: false, sessionPath };
+    }
+
+    const fileCount = Object.keys(files).length;
+    logger.info(`[PreRestore] Restoring ${fileCount} files to ${sessionPath}`);
+
+    // Write all files
+    for (const [relativePath, contentBase64] of Object.entries(files)) {
+      const fullPath = path.join(sessionPath, relativePath);
+      const dir = path.dirname(fullPath);
+      
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(fullPath, Buffer.from(contentBase64, 'base64'));
+    }
+    
+    logger.info(`[PreRestore] Session restored successfully for ${accountId}`);
+    return { restored: true, sessionPath };
+    
+  } catch (error) {
+    logger.error(`[PreRestore] Error restoring session for ${accountId}:`, error);
+    return { restored: false, sessionPath };
+  }
+}
+
+/**
+ * Check if session files already exist (pre-restored)
+ */
+function hasPreRestoredSession(sessionPath) {
+  try {
+    // Check for key session files that indicate valid pre-restored session
+    const defaultPath = path.join(sessionPath, 'Default');
+    const localStoragePath = path.join(defaultPath, 'Local Storage', 'leveldb');
+    
+    // Check if directory exists and has CURRENT file (LevelDB marker)
+    if (fsSync.existsSync(localStoragePath)) {
+      const files = fsSync.readdirSync(localStoragePath);
+      const hasLevelDB = files.some(f => f === 'CURRENT' || f.endsWith('.ldb'));
+      if (hasLevelDB) {
+        logger.info(`[RemoteAuth] Pre-restored session detected at ${sessionPath}`);
+        return true;
+      }
+    }
+    return false;
+  } catch (error) {
+    return false;
+  }
+}
 
 class RemoteAuth extends BaseAuthStrategy {
   constructor(options = {}) {
@@ -58,7 +167,7 @@ class RemoteAuth extends BaseAuthStrategy {
       await fs.mkdir(this.dataPath, { recursive: true });
       await fs.mkdir(sessionPath, { recursive: true });
       
-      logger.info(`[RemoteAuth] Temporary session directory created: ${sessionPath}`);
+      logger.info(`[RemoteAuth] Setting userDataDir: ${sessionPath}`);
 
       // CRITICAL: Tell Puppeteer to use this directory for storage
       // This ensures that the browser saves data to the folder we are backing up
@@ -67,7 +176,16 @@ class RemoteAuth extends BaseAuthStrategy {
         userDataDir: sessionPath
       };
       
-      // Restore session from DB
+      // Check if session was already pre-restored (by whatsappManager)
+      // If so, skip DB fetch to avoid timing issues
+      if (hasPreRestoredSession(sessionPath)) {
+        logger.info(`[RemoteAuth] Session already pre-restored, skipping DB fetch`);
+        return;
+      }
+      
+      // Fallback: try to restore from DB if not pre-restored
+      // (This is slow and may not finish before browser needs the files)
+      logger.warn(`[RemoteAuth] Session not pre-restored, attempting DB restore (may be slow)...`);
       await this.restoreSessionFromDb();
       
     } catch (error) {
@@ -137,24 +255,50 @@ class RemoteAuth extends BaseAuthStrategy {
       const relativePath = path.relative(baseDir, fullPath);
 
       if (file.isDirectory()) {
-        // Optimization: Skip cache directories to reduce database size
-        // We only need Local Storage, IndexedDB, and Cookies for the session
-        if (['Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'DawnCache', 'Service Worker'].includes(file.name)) {
+        // Optimization: Skip only non-essential cache directories
+        // Keep: Local Storage, IndexedDB, Cookies, Session Storage, Service Worker
+        // Skip: Cache (HTTP cache), GPUCache, Code Cache, DawnCache (graphics shaders)
+        const skipDirs = ['Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'DawnCache'];
+        if (skipDirs.includes(file.name)) {
           continue;
         }
         
         const subResults = await this.readDirRecursive(fullPath, baseDir);
         Object.assign(results, subResults);
       } else {
-        // Skip lock files and temporary files
-        if (file.name === 'SingletonLock' || file.name.endsWith('.lock') || file.name.startsWith('.org.chromium.')) {
+        // Skip only lock files and temporary files
+        // IMPORTANT: Keep CURRENT, MANIFEST-*, and .ldb files - these are essential for LevelDB
+        const skipFiles = ['SingletonLock', 'LOCK', 'lockfile'];
+        const skipExtensions = ['.lock', '.log', '-journal'];
+        
+        if (skipFiles.includes(file.name) || 
+            file.name === 'LOG' ||
+            file.name === 'LOG.old' ||
+            skipExtensions.some(ext => file.name.endsWith(ext)) ||
+            file.name.startsWith('.org.chromium.') ||
+            (file.name.startsWith('.') && file.name !== '.'))
+        {
           continue;
         }
-        try {
-          const content = await fs.readFile(fullPath);
+        
+        // Retry logic for locked files
+        let content = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            content = await fs.readFile(fullPath);
+            break;
+          } catch (err) {
+            if (err.code === 'EBUSY' && attempt < 2) {
+              await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
+              continue;
+            }
+            // Silently skip unreadable files - they're usually lock/temp files
+            break;
+          }
+        }
+        
+        if (content) {
           results[relativePath] = content.toString('base64');
-        } catch (err) {
-          logger.warn(`[RemoteAuth] Could not read file ${relativePath}: ${err.message}`);
         }
       }
     }
@@ -179,9 +323,23 @@ class RemoteAuth extends BaseAuthStrategy {
 
       const files = await this.readDirRecursive(sessionPath, sessionPath);
       const fileCount = Object.keys(files).length;
+      const fileNames = Object.keys(files);
       
       if (fileCount === 0) {
         logger.warn('[RemoteAuth] No session files found to save');
+        return;
+      }
+      
+      // Validate we have essential session files (Cookies or IndexedDB data)
+      const hasEssentialFiles = fileNames.some(f => 
+        f.includes('Cookies') || 
+        f.includes('IndexedDB') || 
+        f.includes('Local Storage') ||
+        f.includes('leveldb')
+      );
+      
+      if (!hasEssentialFiles) {
+        logger.warn(`[RemoteAuth] Session incomplete - missing essential files (found: ${fileCount} files)`);
         return;
       }
 
@@ -296,5 +454,8 @@ class RemoteAuth extends BaseAuthStrategy {
   }
 }
 
+// Export both the class and the pre-restore function
 module.exports = RemoteAuth;
+module.exports.preRestoreSession = preRestoreSession;
+module.exports.hasPreRestoredSession = hasPreRestoredSession;
 

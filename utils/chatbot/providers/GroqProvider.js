@@ -2,12 +2,22 @@ const axios = require('axios');
 const BaseProvider = require('./BaseProvider');
 const logger = require('../../logger');
 
-class OpenRouterProvider extends BaseProvider {
+/**
+ * Groq Provider - Free tier LLM provider with fast inference
+ * Free API key available at: https://console.groq.com
+ * 
+ * Free models include:
+ * - llama-3.3-70b-versatile (Recommended)
+ * - llama-3.1-70b-versatile
+ * - llama-3.1-8b-instant (Fastest)
+ * - mixtral-8x7b-32768
+ * - gemma2-9b-it
+ */
+class GroqProvider extends BaseProvider {
   async generateResponse(messages, systemPrompt) {
     try {
-      const model = this.config.model || 'openai/gpt-4o';
+      const model = this.config.model || 'llama-3.3-70b-versatile';
       
-      // OpenRouter uses the standard OpenAI chat completions format
       const payloadMessages = [
         { role: 'system', content: systemPrompt || 'You are a helpful assistant.' },
         ...messages
@@ -18,25 +28,19 @@ class OpenRouterProvider extends BaseProvider {
         messages: payloadMessages,
         temperature: this.config.temperature || 0.7,
         max_tokens: 500,
-        // OpenRouter specific optional parameters
-        provider: {
-          // Optional: Force specific providers if needed
-          // order: ["OpenAI", "Anthropic"],
-          // allow_fallbacks: true
-        }
+        top_p: 1,
+        stream: false
       };
 
       const response = await axios.post(
-        'https://openrouter.ai/api/v1/chat/completions',
+        'https://api.groq.com/openai/v1/chat/completions',
         payload,
         {
           headers: {
             'Authorization': `Bearer ${this.config.api_key}`,
-            'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000', // Required by OpenRouter for rankings
-            'X-Title': 'WhatsApp Multi-Automation', // Required by OpenRouter for rankings
             'Content-Type': 'application/json'
           },
-          timeout: 20000 // Reduced timeout
+          timeout: 15000
         }
       );
 
@@ -47,15 +51,15 @@ class OpenRouterProvider extends BaseProvider {
       return null;
     } catch (error) {
       const errorDetails = error.response?.data?.error || error.message;
-      logger.error('OpenRouter API Error:', JSON.stringify(errorDetails, null, 2));
+      logger.error('Groq API Error:', JSON.stringify(errorDetails, null, 2));
       
-      const newError = new Error(`OpenRouter Error: ${errorDetails.message || error.message}`);
+      const newError = new Error(`Groq Error: ${errorDetails.message || error.message}`);
       if (error.response) {
-          newError.response = error.response;
+        newError.response = error.response;
       }
       throw newError;
     }
   }
 }
 
-module.exports = OpenRouterProvider;
+module.exports = GroqProvider;

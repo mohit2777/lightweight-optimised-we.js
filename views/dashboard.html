@@ -51,6 +51,12 @@
                     <span class="nav-text">Analytics</span>
                     <span class="nav-indicator"></span>
                 </a>
+                <a href="#" class="nav-link" data-view="flows">
+                    <span class="nav-icon"><i class="fas fa-project-diagram"></i></span>
+                    <span class="nav-text">Flow Builder</span>
+                    <span class="nav-indicator"></span>
+                    <span class="nav-badge">AI</span>
+                </a>
                 <a href="#" class="nav-link" data-view="system">
                     <span class="nav-icon"><i class="fas fa-server"></i></span>
                     <span class="nav-text">System</span>
@@ -92,7 +98,7 @@
 
                     <button class="btn-icon notification-btn" id="notificationBtn">
                         <i class="fas fa-bell"></i>
-                        <span class="notification-badge" id="notificationBadge" style="display: none;">0</span>
+                        <span class="notification-badge" id="notificationBadge">3</span>
                     </button>
 
                     <!-- Notification Dropdown -->
@@ -101,14 +107,11 @@
                             <span>Notifications</span>
                             <button class="btn-text" id="markAllRead">Mark all read</button>
                         </div>
-                        <div class="notification-list">
-                            <div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-secondary);">
-                                <i class="far fa-bell-slash" style="font-size: 24px; margin-bottom: 10px; display: block;"></i>
-                                No new notifications
-                            </div>
+                        <div class="notification-list" id="notificationList">
+                            <!-- Notifications will be dynamically populated -->
                         </div>
                         <div class="notification-footer">
-                            <button class="btn-text">View All Notifications</button>
+                            <button class="btn-text" id="clearAllNotifications">Clear All</button>
                         </div>
                     </div>
 
@@ -293,6 +296,60 @@
                     </div>
                 </div>
 
+                <!-- Flows View (Hidden by default) -->
+                <div id="flowsView" style="display: none;">
+                    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                        <div class="stat-card cyber-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-project-diagram"></i>
+                            </div>
+                            <div class="stat-details">
+                                <div class="stat-value" id="totalFlowsStat">0</div>
+                                <div class="stat-label">Total Flows</div>
+                            </div>
+                        </div>
+                        <div class="stat-card cyber-card">
+                            <div class="stat-icon active">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-details">
+                                <div class="stat-value" id="activeFlowsStat">0</div>
+                                <div class="stat-label">Active Flows</div>
+                            </div>
+                        </div>
+                        <div class="stat-card cyber-card">
+                            <div class="stat-icon messages">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="stat-details">
+                                <div class="stat-value" id="flowAccountsStat">0</div>
+                                <div class="stat-label">Accounts with Flows</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="cyber-card">
+                        <div class="card-header">
+                            <div>
+                                <h2 class="card-title">All Flows</h2>
+                                <p class="card-subtitle">AI-powered automation flows across all accounts</p>
+                            </div>
+                            <a href="/flow-builder" class="btn-cyber">
+                                <span class="btn-content">
+                                    <i class="fas fa-plus"></i> Create New Flow
+                                </span>
+                            </a>
+                        </div>
+                        <div id="flowsListContainer" style="padding: 20px;">
+                            <div class="loading-spinner" id="flowsLoading" style="text-align: center; padding: 40px;">
+                                <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary);"></i>
+                                <p style="margin-top: 10px; color: var(--text-secondary);">Loading flows...</p>
+                            </div>
+                            <div id="flowsList" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </main>
     </div>
@@ -365,8 +422,8 @@
                     </div>
                     <div class="form-group">
                         <label>Recipient Number</label>
-                        <input type="text" class="cyber-input" id="messageRecipient" placeholder="e.g. 1234567890" required>
-                        <span class="form-hint">Include country code without + or spaces</span>
+                        <input type="text" class="cyber-input" id="messageRecipient" placeholder="e.g. +1234567890 or 1234567890@c.us" required>
+                        <span class="form-hint">Supports: +1234567890, 1234567890, 1234567890@c.us, or local numbers</span>
                     </div>
 
                     <div class="form-group">
@@ -382,9 +439,14 @@
                             </label>
                             <label class="type-option">
                                 <input type="radio" name="messageType" value="buttons">
-                                <span class="type-box"><i class="fas fa-th-large"></i> Buttons</span>
+                                <span class="type-box" title="Converted to text format"><i class="fas fa-th-large"></i> Buttons*</span>
+                            </label>
+                            <label class="type-option">
+                                <input type="radio" name="messageType" value="poll">
+                                <span class="type-box"><i class="fas fa-poll"></i> Poll</span>
                             </label>
                         </div>
+                        <span class="form-hint" style="color: var(--warning);">* Buttons are converted to text format (WhatsApp Web limitation)</span>
                     </div>
 
                     <div class="form-group">
@@ -416,6 +478,32 @@
                             </div>
                             <button type="button" class="btn-secondary btn-sm" id="addBtnOption" style="margin-top: 10px; width: 100%;">
                                 <i class="fas fa-plus"></i> Add Button
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="pollInputs" style="display: none;">
+                        <div class="form-group">
+                            <label>Poll Question</label>
+                            <input type="text" class="cyber-input" id="pollQuestion" placeholder="What is your favorite color?">
+                        </div>
+                        <div class="form-group">
+                            <label>Allow Multiple Answers</label>
+                            <div class="select-wrapper">
+                                <select class="cyber-input" id="pollMultiSelect">
+                                    <option value="false">No - Single choice only</option>
+                                    <option value="true">Yes - Allow multiple selections</option>
+                                </select>
+                                <i class="fas fa-chevron-down select-icon"></i>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Poll Options</label>
+                            <div id="pollOptionsList">
+                                <!-- Dynamic poll options will be added here -->
+                            </div>
+                            <button type="button" class="btn-secondary btn-sm" id="addPollOption" style="margin-top: 10px; width: 100%;">
+                                <i class="fas fa-plus"></i> Add Option
                             </button>
                         </div>
                     </div>
@@ -456,15 +544,7 @@
             </div>
             <form id="createWebhookForm">
                 <div class="modal-body">
-                    <div class="form-group">
-                        <label>Account</label>
-                        <div class="select-wrapper">
-                            <select class="cyber-input" id="newWebhookAccountId" disabled>
-                                <option value="">Select Account</option>
-                            </select>
-                            <i class="fas fa-chevron-down select-icon"></i>
-                        </div>
-                    </div>
+                    <input type="hidden" id="newWebhookAccountId">
                     <div class="form-group">
                         <label>Webhook URL</label>
                         <input type="url" class="cyber-input" id="webhookUrl" placeholder="https://your-api.com/webhook" required>
@@ -510,11 +590,13 @@
                                 <label>Provider</label>
                                 <div class="select-wrapper">
                                     <select class="cyber-input" id="chatbotProvider">
-                                        <option value="openai">OpenAI</option>
-                                        <option value="gemini">Google Gemini</option>
-                                        <option value="anthropic">Anthropic Claude</option>
-                                        <option value="openrouter">OpenRouter</option>
-                                        <option value="openrouter-free">OpenRouter (Free)</option>
+                                        <option value="">Select Provider</option>
+                                        <option value="gemini">🏆 Google Gemini (1,500 RPD Free)</option>
+                                        <option value="groq">🚀 Groq (14,400 RPD Free - Fastest)</option>
+                                        <option value="mistral">⚖️ Mistral AI (60 RPM Free)</option>
+                                        <option value="sambanova">⚡ SambaNova (30 RPM Free)</option>
+                                        <option value="huggingface">🤗 Hugging Face (300 RPH Free)</option>
+                                        <option value="openrouter">🔀 OpenRouter (Aggregator)</option>
                                     </select>
                                     <i class="fas fa-chevron-down select-icon"></i>
                                 </div>
@@ -549,6 +631,12 @@
                             <div class="form-group">
                                 <label>System Prompt</label>
                                 <textarea class="cyber-input" id="chatbotSystemPrompt" style="height: 120px;" placeholder="You are a helpful assistant..."></textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label>History Limit (Messages)</label>
+                                <input type="number" class="cyber-input" id="chatbotHistoryLimit" min="0" max="50" value="10" placeholder="e.g. 10">
+                                <small style="color: var(--text-secondary); font-size: 0.8em;">Number of past messages to include in context</small>
                             </div>
 
                             <div class="form-group">

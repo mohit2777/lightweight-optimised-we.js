@@ -14,8 +14,27 @@ const logFormat = winston.format.combine(
   winston.format.json()
 );
 
+// Filter out noisy connection timeout errors
+const isNoisyConnectionError = (message, meta) => {
+  const fullMessage = `${message || ''} ${JSON.stringify(meta || {})}`;
+  return (
+    fullMessage.includes('ConnectTimeoutError') ||
+    fullMessage.includes('UND_ERR_CONNECT_TIMEOUT') ||
+    (fullMessage.includes('fetch failed') && fullMessage.includes('timeout'))
+  );
+};
+
+// Custom filter format to skip noisy errors
+const filterNoisyErrors = winston.format((info) => {
+  if (isNoisyConnectionError(info.message, info)) {
+    return false; // Skip this log entry
+  }
+  return info;
+});
+
 // Console format for better readability
 const consoleFormat = winston.format.combine(
+  filterNoisyErrors(),
   winston.format.colorize(),
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
@@ -33,13 +52,13 @@ const logger = winston.createLogger({
   format: logFormat,
   transports: [
     // Write to file
-    new winston.transports.File({ 
-      filename: path.join(logsDir, 'error.log'), 
+    new winston.transports.File({
+      filename: path.join(logsDir, 'error.log'),
       level: 'error',
       maxsize: 5242880, // 5MB
       maxFiles: 5
     }),
-    new winston.transports.File({ 
+    new winston.transports.File({
       filename: path.join(logsDir, 'combined.log'),
       maxsize: 5242880, // 5MB
       maxFiles: 5
@@ -48,7 +67,8 @@ const logger = winston.createLogger({
 });
 
 // Add console transport in development
-if (process.env.NODE_ENV !== 'production') {
+// Add console transport if in development OR if explicitly enabled
+if (process.env.NODE_ENV !== 'production' || process.env.LOG_TO_CONSOLE === 'true') {
   logger.add(new winston.transports.Console({
     format: consoleFormat
   }));

@@ -4,6 +4,7 @@ const OpenAIProvider = require('./providers/OpenAIProvider');
 const GeminiProvider = require('./providers/GeminiProvider');
 const AnthropicProvider = require('./providers/AnthropicProvider');
 const OpenRouterProvider = require('./providers/OpenRouterProvider');
+const GroqProvider = require('./providers/GroqProvider');
 
 class ChatbotManager {
   constructor() {
@@ -12,7 +13,9 @@ class ChatbotManager {
       'openai': OpenAIProvider,
       'gemini': GeminiProvider,
       'anthropic': AnthropicProvider,
-      'openrouter': OpenRouterProvider
+      'openrouter': OpenRouterProvider,
+      'openrouter-free': OpenRouterProvider,
+      'groq': GroqProvider
     };
   }
 
@@ -25,7 +28,7 @@ class ChatbotManager {
    */
   async processMessage(accountId, message, sender) {
     const lockKey = `${accountId}:${sender}`;
-    
+
     // 1. Concurrency Control (Simple Lock)
     if (this.processing.has(lockKey)) {
       logger.debug(`Chatbot busy for ${lockKey}, skipping`);
@@ -41,7 +44,7 @@ class ChatbotManager {
         logger.debug(`[Chatbot] No config found for account ${accountId}`);
         return null;
       }
-      
+
       if (!config.is_active) {
         logger.debug(`[Chatbot] Chatbot is disabled for account ${accountId}`);
         return null;
@@ -64,13 +67,13 @@ class ChatbotManager {
       // Use optimized DB query for history
       const history = await this.getConversationHistory(accountId, sender);
       logger.debug(`[Chatbot] Fetched ${history.length} history items for ${sender}`);
-      
+
       // Add current message to history
       const currentMessage = {
         role: 'user',
         content: message.body
       };
-      
+
       const messages = [...history, currentMessage];
 
       // 5. Send Typing Indicator (if possible)
@@ -89,7 +92,7 @@ class ChatbotManager {
       try {
         const chat = await message.getChat();
         await chat.clearState();
-      } catch (e) {}
+      } catch (e) { }
 
       return response;
 
@@ -99,7 +102,7 @@ class ChatbotManager {
         logger.error(`[Chatbot] CRITICAL: The 'chatbots' table is missing in Supabase. Please run the migration script 'supabase-schema.sql'.`);
         return null;
       }
-      
+
       logger.error(`Chatbot processing error for ${accountId}:`, error);
       return null;
     } finally {
@@ -156,20 +159,20 @@ class ChatbotManager {
         const status = error.response.status;
         const data = error.response.data;
         let details = '';
-        
+
         if (typeof data === 'object') {
-            // Try to extract meaningful error message from common provider formats
-            if (data.error && data.error.message) details = data.error.message;
-            else if (data.error) details = JSON.stringify(data.error);
-            else details = JSON.stringify(data);
+          // Try to extract meaningful error message from common provider formats
+          if (data.error && data.error.message) details = data.error.message;
+          else if (data.error) details = JSON.stringify(data.error);
+          else details = JSON.stringify(data);
         } else {
-            details = data;
+          details = data;
         }
 
         if (status === 401) throw new Error(`Authentication Failed (401): Check your API Key.`);
         if (status === 429) throw new Error(`Rate Limit Exceeded (429): You are sending too many requests.`);
         if (status === 500) throw new Error(`Provider Server Error (500): The AI provider is having issues.`);
-        
+
         throw new Error(`API Error (${status}): ${details}`);
       }
       throw error;

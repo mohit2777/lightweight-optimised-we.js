@@ -1,0 +1,2953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chatbot Flow Builder - WhatsApp Automation</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #25D366;
+      --primary-dark: #128C7E;
+      --bg: #0a0f1a;
+      --bg-light: #111827;
+      --card: rgba(255,255,255,0.05);
+      --border: rgba(255,255,255,0.1);
+      --text: #fff;
+      --text-muted: #a0aec0;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      overflow: hidden;
+    }
+    
+    .app {
+      display: grid;
+      grid-template-columns: 260px 1fr 300px;
+      grid-template-rows: 60px 1fr;
+      height: 100vh;
+    }
+    
+    /* Header */
+    .header {
+      grid-column: 1 / -1;
+      background: var(--bg-light);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+    }
+    .header h1 {
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header h1 i { color: var(--primary); }
+    .header-actions { display: flex; gap: 12px; align-items: center; }
+    
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    /* Sidebar */
+    .sidebar {
+      background: var(--bg-light);
+      border-right: 1px solid var(--border);
+      padding: 16px;
+      overflow-y: auto;
+    }
+    .sidebar h2 {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .palette-node {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      margin-bottom: 8px;
+      transition: all 0.2s;
+      user-select: none;
+    }
+    .palette-node:hover {
+      border-color: var(--primary);
+      background: rgba(37, 211, 102, 0.1);
+    }
+    .palette-node .icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: #fff;
+    }
+    .palette-node .info h4 { font-size: 13px; margin-bottom: 2px; }
+    .palette-node .info p { font-size: 10px; color: var(--text-muted); }
+    
+    /* Canvas */
+    .canvas-container {
+      position: relative;
+      overflow: auto;
+      background: 
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 20px 20px;
+    }
+    
+    #canvas {
+      position: relative;
+      width: 3000px;
+      height: 2000px;
+      min-height: 100%;
+    }
+    
+    .canvas-hint {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+    .canvas-hint i { font-size: 48px; margin-bottom: 16px; opacity: 0.3; }
+    .canvas-hint p { font-size: 14px; }
+    
+    /* Flow Nodes */
+    .flow-node {
+      position: absolute;
+      min-width: 160px;
+      max-width: 200px;
+      background: var(--bg-light);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      cursor: move;
+      user-select: none;
+      z-index: 10;
+    }
+    .flow-node.selected {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.3);
+    }
+    .flow-node-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .flow-node-header .icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: #fff;
+    }
+    .flow-node-header .title { font-size: 12px; font-weight: 600; }
+    .flow-node-body {
+      padding: 8px 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+      max-height: 60px;
+      overflow: hidden;
+    }
+    
+    .handle {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      background: var(--primary);
+      border: 2px solid var(--bg-light);
+      border-radius: 50%;
+      cursor: crosshair;
+      z-index: 20;
+    }
+    .handle-in { top: -6px; left: 50%; transform: translateX(-50%); }
+    .handle-out { bottom: -6px; left: 50%; transform: translateX(-50%); }
+    
+    /* Connections SVG */
+    #connectionsSvg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+    }
+    .connection-line {
+      stroke: var(--primary);
+      stroke-width: 2;
+      fill: none;
+    }
+    .connection-line.temp {
+      stroke-dasharray: 5,5;
+      opacity: 0.6;
+    }
+    
+    /* Properties Panel */
+    .properties {
+      background: var(--bg-light);
+      border-left: 1px solid var(--border);
+      padding: 16px;
+      overflow-y: auto;
+    }
+    .properties h2 {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .properties-empty {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 30px 10px;
+    }
+    .properties-empty i { font-size: 36px; margin-bottom: 12px; opacity: 0.3; }
+    
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+    }
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 12px;
+    }
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    .form-group textarea { min-height: 70px; resize: vertical; }
+    .form-group small { display: block; font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+    
+    .options-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+    .option-item { display: flex; gap: 6px; }
+    .option-item input { flex: 1; }
+    .option-item .btn-remove {
+      padding: 6px 10px;
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 5px;
+      color: #fca5a5;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .btn-add {
+      width: 100%;
+      padding: 8px;
+      background: var(--card);
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .btn-add:hover { border-color: var(--primary); color: var(--primary); }
+    
+    .btn-delete-node {
+      width: 100%;
+      padding: 10px;
+      margin-top: 16px;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 6px;
+      color: #fca5a5;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    
+    /* Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal.show { display: flex; }
+    .modal-content {
+      background: var(--bg-light);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 90%;
+      max-width: 500px;
+      max-height: 80vh;
+      overflow: hidden;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-header h3 { font-size: 16px; }
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      cursor: pointer;
+    }
+    .modal-body { padding: 20px; overflow-y: auto; max-height: 60vh; }
+    
+    .flow-list-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    .flow-list-item:hover { border-color: var(--primary); }
+    .flow-list-item h4 { font-size: 13px; margin-bottom: 3px; }
+    .flow-list-item p { font-size: 11px; color: var(--text-muted); }
+    .flow-list-item .actions { display: flex; gap: 6px; }
+    .flow-list-item .actions button {
+      padding: 5px 10px;
+      border-radius: 5px;
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .flow-list-item .btn-load { background: var(--primary); color: #fff; }
+    .flow-list-item .btn-del { background: rgba(239,68,68,0.2); color: #fca5a5; }
+    
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      background: var(--bg-light);
+      border: 1px solid var(--primary);
+      border-radius: 8px;
+      z-index: 1001;
+      display: none;
+      font-size: 13px;
+    }
+    .toast.show { display: block; }
+    .toast.error { border-color: #ef4444; }
+
+    /* Zoom controls */
+    .zoom-controls {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      display: flex;
+      gap: 6px;
+      z-index: 100;
+    }
+    .zoom-btn {
+      width: 32px;
+      height: 32px;
+      background: var(--bg-light);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+    .zoom-btn:hover { border-color: var(--primary); }
+    
+    .flow-name-display {
+      padding: 6px 12px;
+      background: var(--card);
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .flow-name-display.active { color: var(--primary); border: 1px solid var(--primary); }
+    
+    /* New Sidebar Styles */
+    .sidebar-nav-section {
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .sidebar-nav-btn:hover {
+      border-color: var(--primary);
+      background: rgba(37, 211, 102, 0.1);
+    }
+    .sidebar-section {
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    .sidebar-select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    .sidebar-select option {
+      background: var(--bg-light);
+      color: var(--text);
+    }
+    .account-indicators {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .account-indicators .indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      background: var(--card);
+      border-radius: 4px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .account-indicators .indicator.active {
+      background: rgba(37, 211, 102, 0.15);
+      color: var(--primary);
+    }
+    .quick-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 8px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-align: center;
+    }
+    .stat-item i {
+      color: var(--primary);
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+    .stat-item span {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .stat-item label {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .export-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    .export-btn {
+      flex: 1;
+      padding: 8px 10px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .export-btn:hover {
+      border-color: var(--primary);
+      background: rgba(37, 211, 102, 0.1);
+    }
+    .webhooks-info {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    .webhook-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+    }
+    .webhook-item:last-child {
+      border-bottom: none;
+    }
+    .webhook-item .url {
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-muted);
+    }
+    .webhook-item .status {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 500;
+    }
+    .webhook-item .status.active {
+      background: rgba(37, 211, 102, 0.2);
+      color: var(--primary);
+    }
+    .webhook-item .status.inactive {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+    }
+    .manage-webhooks-link {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--primary);
+      text-decoration: none;
+      font-size: 11px;
+      transition: opacity 0.2s;
+    }
+    .manage-webhooks-link:hover {
+      opacity: 0.8;
+    }
+    .no-flow-hint {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 12px;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 11px;
+      color: #f59e0b;
+      line-height: 1.4;
+    }
+    .no-flow-hint i {
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+    .no-flow-hint.hidden {
+      display: none;
+    }
+    #nodePalette.disabled .palette-node {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <div class="header">
+      <h1>
+        <a href="/" style="color: inherit; text-decoration: none; display: flex; align-items: center; gap: 12px;">
+          <i class="fab fa-whatsapp"></i> Chatbot Flow Builder
+        </a>
+      </h1>
+      <div class="header-actions">
+        <div class="flow-name-display" id="flowNameDisplay">No flow loaded</div>
+        <button class="btn btn-secondary" onclick="showFlowsModal()">
+          <i class="fas fa-folder-open"></i> My Flows
+        </button>
+        <button class="btn btn-secondary" onclick="showNewFlowModal()">
+          <i class="fas fa-plus"></i> New Flow
+        </button>
+        <button class="btn btn-secondary" onclick="showTestModal()" id="testBtn" disabled style="background: rgba(236, 72, 153, 0.2); border-color: rgba(236, 72, 153, 0.4);">
+          <i class="fas fa-play-circle"></i> Test Flow
+        </button>
+        <button class="btn btn-primary" onclick="saveFlow()" id="saveBtn" disabled>
+          <i class="fas fa-save"></i> Save
+        </button>
+      </div>
+    </div>
+    
+    <!-- Sidebar - Node Palette -->
+    <div class="sidebar">
+      <!-- Navigation Section -->
+      <div class="sidebar-nav-section">
+        <a href="/dashboard" class="sidebar-nav-btn">
+          <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+      </div>
+      
+      <!-- Account Selector -->
+      <div class="sidebar-section">
+        <h2>📱 Account</h2>
+        <select id="accountFilter" class="sidebar-select" onchange="filterByAccount()">
+          <option value="">All Accounts</option>
+        </select>
+        <div id="accountIndicators" class="account-indicators">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+      
+      <!-- Quick Stats -->
+      <div class="sidebar-section">
+        <h2>📊 Quick Stats</h2>
+        <div class="quick-stats">
+          <div class="stat-item">
+            <i class="fas fa-project-diagram"></i>
+            <span id="totalFlowsCount">0</span>
+            <label>Total Flows</label>
+          </div>
+          <div class="stat-item">
+            <i class="fas fa-check-circle"></i>
+            <span id="activeFlowsCount">0</span>
+            <label>Active</label>
+          </div>
+        </div>
+      </div>
+      
+      <h2>📦 Click to Add Nodes</h2>
+      <div id="noFlowHint" class="no-flow-hint">
+        <i class="fas fa-info-circle"></i>
+        <span>Click <strong>"+ New Flow"</strong> or <strong>"My Flows"</strong> above to get started</span>
+      </div>
+      <div id="nodePalette"></div>
+      
+      <!-- Data & Export Section -->
+      <div class="sidebar-section" style="margin-top: 20px;">
+        <h2>📤 Data & Export</h2>
+        <div class="export-buttons">
+          <button class="export-btn" onclick="exportFlowJSON()" title="Export current flow as JSON">
+            <i class="fas fa-file-code"></i> Export JSON
+          </button>
+          <button class="export-btn" onclick="importFlowJSON()" title="Import flow from JSON file">
+            <i class="fas fa-file-import"></i> Import
+          </button>
+        </div>
+        <input type="file" id="importFileInput" accept=".json" style="display: none;" onchange="handleImportFile(event)">
+      </div>
+      
+      <!-- Flow Webhook (for leads) -->
+      <div class="sidebar-section" style="margin-top: 20px;">
+        <h2>🎯 Flow Webhook (Leads)</h2>
+        <div id="flowWebhookInfo" class="webhooks-info">
+          <p style="font-size: 11px; color: var(--text-muted);">Load a flow to configure its webhook</p>
+        </div>
+        <p style="font-size: 10px; color: var(--text-muted); margin-top: 6px;">
+          <i class="fas fa-info-circle"></i> Flow webhook sends lead data when flow completes
+        </p>
+      </div>
+      
+      <!-- Account Webhooks (for messages) -->
+      <div class="sidebar-section" style="margin-top: 10px;">
+        <h2>📨 Account Webhooks (Messages)</h2>
+        <div id="webhooksInfo" class="webhooks-info">
+          <p style="font-size: 11px; color: var(--text-muted);">Select an account to view webhooks</p>
+        </div>
+        <a href="/dashboard" class="manage-webhooks-link" onclick="event.preventDefault(); goToWebhooks();">
+          <i class="fas fa-cog"></i> Manage in Dashboard
+        </a>
+        <p style="font-size: 10px; color: var(--text-muted); margin-top: 6px;">
+          <i class="fas fa-info-circle"></i> Account webhooks send all incoming messages
+        </p>
+      </div>
+      
+      <h2 style="margin-top: 20px;">ℹ️ How it Works</h2>
+      <div style="font-size: 11px; color: var(--text-muted); line-height: 1.6;">
+        <p style="margin-bottom: 8px;"><strong>1.</strong> Create a new flow with trigger keywords</p>
+        <p style="margin-bottom: 8px;"><strong>2.</strong> Click nodes on left to add them</p>
+        <p style="margin-bottom: 8px;"><strong>3.</strong> Drag nodes to position them</p>
+        <p style="margin-bottom: 8px;"><strong>4.</strong> Drag from bottom dot to connect</p>
+        <p style="margin-bottom: 8px;"><strong>5.</strong> Click node to configure it</p>
+        <p><strong>6.</strong> Save and your bot is live!</p>
+      </div>
+    </div>
+    
+    <!-- Canvas -->
+    <div class="canvas-container" id="canvasContainer">
+      <div id="canvas">
+        <svg id="connectionsSvg"></svg>
+        <div class="canvas-hint" id="canvasHint">
+          <i class="fas fa-robot"></i>
+          <p>Create or load a flow to get started</p>
+        </div>
+      </div>
+      <div class="zoom-controls">
+        <button class="zoom-btn" onclick="zoomIn()" title="Zoom In"><i class="fas fa-plus"></i></button>
+        <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out"><i class="fas fa-minus"></i></button>
+        <button class="zoom-btn" onclick="resetView()" title="Reset"><i class="fas fa-compress-arrows-alt"></i></button>
+      </div>
+    </div>
+    
+    <!-- Properties Panel -->
+    <div class="properties">
+      <h2>⚙️ Properties</h2>
+      <div id="propertiesPanel">
+        <div class="properties-empty">
+          <i class="fas fa-mouse-pointer"></i>
+          <p>Click a node to configure it</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Flows List Modal -->
+  <div class="modal" id="flowsModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>My Chatbot Flows</h3>
+        <button class="modal-close" onclick="closeModal('flowsModal')">&times;</button>
+      </div>
+      <div class="modal-body" id="flowsList">
+        <p style="text-align: center; color: var(--text-muted);">Loading...</p>
+      </div>
+    </div>
+  </div>
+  
+  <!-- New Flow Modal -->
+  <div class="modal" id="newFlowModal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>Create New Chatbot Flow</h3>
+        <button class="modal-close" onclick="closeModal('newFlowModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="newFlowForm" onsubmit="createFlow(event)">
+          <div class="form-group">
+            <label>Flow Name *</label>
+            <input type="text" id="newFlowName" required placeholder="e.g., Welcome Bot, Lead Capture">
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <input type="text" id="newFlowDesc" placeholder="What does this flow do?">
+          </div>
+          <div class="form-group">
+            <label>WhatsApp Account *</label>
+            <select id="newFlowAccount" required>
+              <option value="">Select an account...</option>
+            </select>
+            <small>The flow will only respond to messages on this account</small>
+          </div>
+          
+          <!-- Flow Type Selection -->
+          <div class="form-group">
+            <label>Flow Type *</label>
+            <div style="display: flex; gap: 12px; margin-top: 8px;">
+              <label style="flex: 1; padding: 12px; background: var(--card); border: 2px solid var(--border); border-radius: 8px; cursor: pointer; text-align: center;" onclick="selectFlowType('basic')">
+                <input type="radio" name="flowType" value="basic" id="flowTypeBasic" checked style="display: none;">
+                <div id="flowTypeBasicBox" style="border-color: var(--primary);">
+                  <i class="fas fa-robot" style="font-size: 24px; color: var(--primary); margin-bottom: 6px; display: block;"></i>
+                  <strong>Basic Flow</strong>
+                  <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Button menus, simple inputs</div>
+                </div>
+              </label>
+              <label style="flex: 1; padding: 12px; background: var(--card); border: 2px solid var(--border); border-radius: 8px; cursor: pointer; text-align: center;" onclick="selectFlowType('ai')">
+                <input type="radio" name="flowType" value="ai" id="flowTypeAI" style="display: none;">
+                <div id="flowTypeAIBox">
+                  <i class="fas fa-brain" style="font-size: 24px; color: #ec4899; margin-bottom: 6px; display: block;"></i>
+                  <strong>AI-Powered</strong>
+                  <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Smart data extraction with LLM</div>
+                </div>
+              </label>
+            </div>
+          </div>
+          
+          <!-- AI Configuration (shown only for AI flows) -->
+          <div id="aiConfigSection" style="display: none; background: rgba(236, 72, 153, 0.05); border: 1px solid rgba(236, 72, 153, 0.2); border-radius: 8px; padding: 16px; margin-bottom: 14px;">
+            <h4 style="font-size: 13px; margin-bottom: 12px; color: #f472b6;"><i class="fas fa-brain"></i> AI Configuration</h4>
+            
+            <div class="form-group">
+              <label>LLM Provider *</label>
+              <select id="newFlowLLMProvider" onchange="loadLLMModels()">
+                <option value="">Select provider...</option>
+                <option value="groq">Groq (Free - Llama, Mixtral)</option>
+                <option value="openrouter">OpenRouter (Free models)</option>
+                <option value="gemini">Google Gemini (Free tier)</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label>API Key *</label>
+              <input type="password" id="newFlowLLMKey" placeholder="Your API key (stored securely)">
+              <small>Get free API keys: <a href="https://console.groq.com" target="_blank" style="color: var(--primary);">Groq</a> | <a href="https://openrouter.ai" target="_blank" style="color: var(--primary);">OpenRouter</a> | <a href="https://aistudio.google.com/apikey" target="_blank" style="color: var(--primary);">Gemini</a></small>
+            </div>
+            
+            <div class="form-group">
+              <label>Model *</label>
+              <select id="newFlowLLMModel">
+                <option value="">Select provider first...</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label>🎭 AI Persona</label>
+              <input type="text" id="newFlowLLMPersona" placeholder="e.g., Sarah, a friendly real estate consultant">
+              <small>Give your AI a name and role for more natural conversations</small>
+            </div>
+            
+            <div class="form-group">
+              <label>🎯 Temperature: <span id="temperatureValue">0.7</span></label>
+              <input type="range" id="newFlowLLMTemperature" min="0" max="2" step="0.1" value="0.7" style="width: 100%;" oninput="document.getElementById('temperatureValue').textContent = this.value">
+              <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted);">
+                <span>Precise (0)</span>
+                <span>Balanced (0.7)</span>
+                <span>Creative (2)</span>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label>Custom Instructions (optional)</label>
+              <textarea id="newFlowLLMInstructions" placeholder="e.g., Be friendly and professional. This is a real estate lead capture bot..." style="min-height: 60px;"></textarea>
+              <small>Guide the AI's personality and behavior</small>
+            </div>
+            
+            <div class="form-group">
+              <label>📚 Company Knowledge Base</label>
+              <textarea id="newFlowKnowledgeBase" placeholder="Enter your company information, FAQs, services, policies, etc. The AI will use this to answer customer questions and handle objections intelligently.
+
+Example:
+- Company: ABC Real Estate
+- Services: We help find dream homes, apartments, commercial properties
+- Why we collect name: To personalize communication and property recommendations
+- Why we collect phone: To send property updates and schedule viewings
+- Office hours: Mon-Sat 9AM-6PM
+- Locations: Mumbai, Delhi, Bangalore" style="min-height: 150px; font-size: 13px;"></textarea>
+              <small>💡 The AI uses this to answer questions like "Why do you need my name?" or "What services do you offer?"</small>
+            </div>
+            
+            <div class="form-group" style="background: rgba(59, 130, 246, 0.1); padding: 12px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.3);">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="newFlowSharedMemory" style="width: 18px; height: 18px;">
+                <span style="font-weight: 600;"><i class="fas fa-brain"></i> Share Memory with Chatbot</span>
+              </label>
+              <small style="display: block; margin-top: 6px; margin-left: 26px;">
+                When enabled, this flow will share conversation history with the AI chatbot configured for this account. 
+                This allows for seamless transitions between flow and free-form chatbot conversations.
+              </small>
+            </div>
+            
+            <div class="form-group">
+              <label>Webhook URL (optional)</label>
+              <input type="url" id="newFlowWebhook" placeholder="https://your-server.com/webhook">
+              <small>Data will be sent here immediately when flow completes</small>
+            </div>
+            
+            <button type="button" class="btn btn-secondary" style="width: 100%;" onclick="testLLMConnection()">
+              <i class="fas fa-plug"></i> Test LLM Connection
+            </button>
+          </div>
+          
+          <div class="form-group">
+            <label>Trigger Type *</label>
+            <select id="newFlowTriggerType" onchange="toggleKeywordsField()">
+              <option value="keyword">Keyword Match</option>
+              <option value="all">All Messages (no keyword needed)</option>
+              <option value="regex">Regex Pattern</option>
+            </select>
+          </div>
+          <div class="form-group" id="keywordsGroup">
+            <label>Trigger Keywords (comma separated)</label>
+            <input type="text" id="newFlowKeywords" placeholder="hi, hello, help, start">
+            <small>Flow triggers when message contains any of these words</small>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="newFlowActive" checked> Activate flow immediately
+            </label>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+            <i class="fas fa-plus"></i> Create Flow
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Test Simulation Modal -->
+  <div class="modal" id="testModal">
+    <div class="modal-content" style="max-width: 500px; max-height: 90vh;">
+      <div class="modal-header" style="background: rgba(236, 72, 153, 0.1);">
+        <h3><i class="fas fa-play-circle" style="color: #ec4899;"></i> Test Flow & Chatbot</h3>
+        <button class="modal-close" onclick="closeTestModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 0; display: flex; flex-direction: column; height: 65vh;">
+        
+        <!-- Status Indicator Bar -->
+        <div id="testStatusBar" style="padding: 10px 16px; background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.1)); border-bottom: 1px solid var(--border); font-size: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <div id="flowStatusIndicator" style="display: flex; align-items: center; gap: 6px;">
+              <span class="status-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #6b7280;"></span>
+              <span style="color: #6b7280;">Flow Idle</span>
+            </div>
+            <div id="chatbotStatusIndicator" style="display: flex; align-items: center; gap: 6px; color: #10b981;">
+              <i class="fas fa-robot" style="font-size: 12px;"></i>
+              <span>Chatbot Active</span>
+            </div>
+          </div>
+          <div id="triggerHint" style="margin-top: 6px; font-size: 11px; color: var(--text-muted);">
+            <i class="fas fa-lightbulb" style="color: #f59e0b;"></i> 
+            Type trigger word to start flow, or chat normally with chatbot
+          </div>
+        </div>
+        
+        <!-- Chat simulation area -->
+        <div id="testChatArea" style="flex: 1; overflow-y: auto; padding: 16px; background: var(--bg);">
+          <div style="text-align: center; color: var(--text-muted); padding: 30px;">
+            <i class="fas fa-comments" style="font-size: 40px; opacity: 0.3;"></i>
+            <p style="margin-top: 12px; font-size: 13px;">Start typing to test your flow and chatbot</p>
+            <p style="margin-top: 4px; font-size: 11px; color: var(--text-muted);" id="triggerWordsHint"></p>
+          </div>
+        </div>
+        
+        <!-- Collected data display -->
+        <div id="testDataPanel" style="display: none; padding: 12px; background: rgba(37, 211, 102, 0.1); border-top: 1px solid var(--border);">
+          <div style="font-size: 11px; color: var(--primary); margin-bottom: 6px;"><i class="fas fa-database"></i> Collected Data</div>
+          <div id="testCollectedData" style="font-size: 12px; font-family: monospace;"></div>
+        </div>
+        
+        <!-- Input area -->
+        <div style="padding: 12px; border-top: 1px solid var(--border); background: var(--bg-light);">
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="testMessageInput" placeholder="Type your message..." 
+                   style="flex: 1; padding: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px;"
+                   onkeypress="if(event.key === 'Enter') sendTestMessage()">
+            <button class="btn btn-primary" onclick="sendTestMessage()" id="testSendBtn">
+              <i class="fas fa-paper-plane"></i>
+            </button>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="btn btn-secondary" onclick="resetTestSimulation()" id="testResetBtn" style="flex: 1;">
+              <i class="fas fa-redo"></i> Reset Chat
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // Global fetch wrapper to handle 401 errors
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+      const response = await originalFetch.apply(this, args);
+      if (response.status === 401) {
+        console.warn('Session expired, redirecting to login...');
+        window.location.href = '/login';
+        throw new Error('Session expired');
+      }
+      return response;
+    };
+    
+    // ========== STATE ==========
+    const API = '/api/chatbot';
+    let currentFlow = null;
+    let nodes = [];
+    let connections = [];
+    let selectedNodeId = null;
+    let accounts = [];
+    let zoom = 1;
+    let llmProviders = [];
+    let simulationSessionId = null;
+    
+    // Dragging state
+    let draggedNode = null;
+    let dragOffset = { x: 0, y: 0 };
+    
+    // Connection drawing state
+    let isDrawingConnection = false;
+    let connectionStart = null;
+    let tempLine = null;
+    
+    // Node types configuration - Simplified for robust lead collection
+    // Core nodes for AI-powered data collection flows
+    const nodeTypes = [
+      { type: 'start', label: 'Start', icon: 'play', color: '#10b981', desc: 'Entry point', category: 'core' },
+      { type: 'message', label: 'Send Message', icon: 'comment', color: '#3b82f6', desc: 'Send a text message', category: 'core' },
+      { type: 'collect', label: 'AI Collect Data', icon: 'brain', color: '#ec4899', desc: 'Smart data collection with AI', category: 'core' },
+      { type: 'end', label: 'End Flow', icon: 'stop', color: '#ef4444', desc: 'End & send webhook', category: 'core' },
+      // Advanced nodes (expandable)
+      { type: 'condition', label: 'Condition', icon: 'code-branch', color: '#a855f7', desc: 'If/else logic', category: 'advanced' },
+      { type: 'api', label: 'API Call', icon: 'plug', color: '#06b6d4', desc: 'HTTP request', category: 'advanced' }
+    ];
+    
+    // Legacy node type mapping for backwards compatibility
+    const legacyNodeTypeMap = {
+      'ai_question': 'collect',
+      'input': 'collect',
+      'buttons': 'message',
+      'delay': 'message'
+    };
+    
+    // ========== AI FLOW CONFIGURATION ==========
+    function selectFlowType(type) {
+      document.getElementById('flowTypeBasic').checked = (type === 'basic');
+      document.getElementById('flowTypeAI').checked = (type === 'ai');
+      
+      // Update visual selection
+      const basicBox = document.getElementById('flowTypeBasicBox').parentElement;
+      const aiBox = document.getElementById('flowTypeAIBox').parentElement;
+      
+      if (type === 'basic') {
+        basicBox.style.borderColor = 'var(--primary)';
+        aiBox.style.borderColor = 'var(--border)';
+        document.getElementById('aiConfigSection').style.display = 'none';
+      } else {
+        basicBox.style.borderColor = 'var(--border)';
+        aiBox.style.borderColor = '#ec4899';
+        document.getElementById('aiConfigSection').style.display = 'block';
+        loadLLMProviders();
+      }
+    }
+    
+    async function loadLLMProviders() {
+      if (llmProviders.length > 0) return;
+      
+      try {
+        const res = await fetch(API + '/llm-providers', { credentials: 'include' });
+        llmProviders = await res.json();
+      } catch (e) {
+        console.error('Failed to load LLM providers:', e);
+      }
+    }
+    
+    function loadLLMModels() {
+      const provider = document.getElementById('newFlowLLMProvider').value;
+      const modelSelect = document.getElementById('newFlowLLMModel');
+      
+      if (!provider) {
+        modelSelect.innerHTML = '<option value="">Select provider first...</option>';
+        return;
+      }
+      
+      // Comprehensive list of free models
+      const models = {
+        groq: [
+          { id: 'llama-3.3-70b-versatile', name: '⭐ Llama 3.3 70B Versatile (Recommended)' },
+          { id: 'llama-3.1-70b-versatile', name: 'Llama 3.1 70B Versatile' },
+          { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Fastest)' },
+          { id: 'llama3-70b-8192', name: 'Llama 3 70B' },
+          { id: 'llama3-8b-8192', name: 'Llama 3 8B' },
+          { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B (32K context)' },
+          { id: 'gemma2-9b-it', name: 'Gemma 2 9B' },
+          { id: 'gemma-7b-it', name: 'Gemma 7B' }
+        ],
+        openrouter: [
+          // Most Popular Free Models
+          { id: 'meta-llama/llama-3.3-70b-instruct:free', name: '⭐ Llama 3.3 70B Instruct (Free)' },
+          { id: 'google/gemini-2.0-flash-exp:free', name: '⭐ Gemini 2.0 Flash Exp (Free)' },
+          { id: 'deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1 0528 (Free)' },
+          { id: 'qwen/qwen3-235b-a22b:free', name: 'Qwen3 235B A22B (Free)' },
+          { id: 'google/gemma-3-27b-it:free', name: 'Gemma 3 27B (Free)' },
+          // DeepSeek Models (Free)
+          { id: 'tngtech/deepseek-r1t2-chimera:free', name: 'DeepSeek R1T2 Chimera (Free, 164K ctx)' },
+          { id: 'tngtech/deepseek-r1t-chimera:free', name: 'DeepSeek R1T Chimera (Free)' },
+          { id: 'tngtech/r1t-chimera:free', name: 'R1T Chimera Creative (Free)' },
+          // Coding Models (Free)
+          { id: 'kwaipilot/kat-coder-pro-v1:free', name: 'KAT-Coder-Pro V1 (Free, 256K ctx)' },
+          { id: 'mistralai/devstral-2-2512:free', name: 'Mistral Devstral 2 (Free, 262K ctx)' },
+          { id: 'qwen/qwen3-coder-480b-a35b:free', name: 'Qwen3 Coder 480B (Free)' },
+          // Vision & Multimodal (Free)
+          { id: 'nvidia/nemotron-nano-12b-2-vl:free', name: 'NVIDIA Nemotron Nano 12B VL (Free)' },
+          // Other Free Models
+          { id: 'z-ai/glm-4.5-air:free', name: 'Z.AI GLM 4.5 Air (Free, 131K ctx)' },
+          { id: 'amazon/nova-2-lite:free', name: 'Amazon Nova 2 Lite (Free, 1M ctx)' },
+          { id: 'allenai/olmo-3-32b-think:free', name: 'AllenAI Olmo 3 32B Think (Free)' },
+          { id: 'openai/gpt-oss-20b:free', name: 'OpenAI GPT-OSS 20B (Free)' },
+          { id: 'meituan/longcat-flash-chat:free', name: 'Meituan LongCat Flash (Free, 128K ctx)' }
+        ],
+        gemini: [
+          // Flash Models (Recommended)
+          { id: 'gemini-2.5-flash', name: '⭐ Gemini 2.5 Flash (Recommended)' },
+          { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite (Faster)' },
+          { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+          { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Experimental' },
+          { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash Lite (Fastest)' },
+          // Preview Models
+          { id: 'gemini-2.5-flash-preview-09-2025', name: 'Gemini 2.5 Flash Preview' },
+          { id: 'gemini-2.5-flash-lite-preview-09-2025', name: 'Gemini 2.5 Flash Lite Preview' },
+          { id: 'gemini-exp-1206', name: 'Gemini Experimental 1206' },
+          // Gemma Models (Open Source)
+          { id: 'gemma-3-27b-it', name: 'Gemma 3 27B IT' },
+          { id: 'gemma-3-12b-it', name: 'Gemma 3 12B IT' },
+          { id: 'gemma-3-4b-it', name: 'Gemma 3 4B IT' },
+          { id: 'gemma-3-1b-it', name: 'Gemma 3 1B IT (Smallest)' },
+          { id: 'gemma-3n-e4b-it', name: 'Gemma 3N E4B IT' },
+          { id: 'gemma-3n-e2b-it', name: 'Gemma 3N E2B IT' }
+        ]
+      };
+      
+      const providerModels = models[provider] || [];
+      modelSelect.innerHTML = providerModels.map(m => 
+        `<option value="${m.id}">${m.name}</option>`
+      ).join('');
+    }
+    
+    async function testLLMConnection() {
+      const provider = document.getElementById('newFlowLLMProvider').value;
+      const apiKey = document.getElementById('newFlowLLMKey').value;
+      const model = document.getElementById('newFlowLLMModel').value;
+      
+      if (!provider || !apiKey || !model) {
+        showToast('Please fill in provider, API key, and model', 'error');
+        return;
+      }
+      
+      showToast('Testing connection...', 'success');
+      
+      try {
+        const res = await fetch(API + '/llm-test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ provider, apiKey, model })
+        });
+        
+        const result = await res.json();
+        if (result.success) {
+          showToast('✓ Connection successful! LLM is working.', 'success');
+        } else {
+          showToast('✗ Connection failed: ' + (result.error || 'Unknown error'), 'error');
+        }
+      } catch (e) {
+        showToast('✗ Connection failed: ' + e.message, 'error');
+      }
+    }
+    
+    // ========== INITIALIZATION ==========
+    async function init() {
+      console.log('[FlowBuilder] Initializing...');
+      try {
+        renderNodePalette();
+        setupCanvasEvents();
+        // Start with palette disabled until a flow is loaded
+        updateNodePaletteState(false);
+        await loadAccounts();
+        await loadSidebarData();
+        console.log('[FlowBuilder] Initialization complete. Accounts:', accounts.length, 'Flows:', allFlows.length);
+      } catch (e) {
+        console.error('[FlowBuilder] Initialization error:', e);
+        showToast('Failed to initialize flow builder', 'error');
+      }
+    }
+    
+    // ========== SIDEBAR DATA ==========
+    let allFlows = [];
+    let allWebhooks = [];
+    
+    async function loadSidebarData() {
+      try {
+        console.log('[FlowBuilder] Loading sidebar data...');
+        // Load flows for sidebar stats
+        const flowsRes = await fetch(API + '/flows', { credentials: 'include' });
+        
+        if (flowsRes.ok) {
+          allFlows = await flowsRes.json() || [];
+          console.log('[FlowBuilder] Loaded', allFlows.length, 'flows');
+        } else {
+          console.error('[FlowBuilder] Failed to load flows:', flowsRes.status, flowsRes.statusText);
+          allFlows = [];
+        }
+        
+        // Webhooks are per-account, so we'll load them when account is selected
+        allWebhooks = [];
+        
+        updateSidebarStats();
+        populateAccountFilter();
+      } catch (e) {
+        console.error('[FlowBuilder] Failed to load sidebar data:', e);
+      }
+    }
+    
+    function updateSidebarStats() {
+      const totalFlows = allFlows.length;
+      const activeFlows = allFlows.filter(f => f.is_active).length;
+      
+      document.getElementById('totalFlowsCount').textContent = totalFlows;
+      document.getElementById('activeFlowsCount').textContent = activeFlows;
+    }
+    
+    function populateAccountFilter() {
+      const select = document.getElementById('accountFilter');
+      select.innerHTML = '<option value="">All Accounts</option>' +
+        accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+    }
+    
+    function filterByAccount() {
+      const accountId = document.getElementById('accountFilter').value;
+      updateAccountIndicators(accountId);
+      updateWebhooksInfo(accountId);
+      
+      // Update stats for selected account
+      if (accountId) {
+        const accountFlows = allFlows.filter(f => f.account_id === accountId);
+        document.getElementById('totalFlowsCount').textContent = accountFlows.length;
+        document.getElementById('activeFlowsCount').textContent = accountFlows.filter(f => f.is_active).length;
+      } else {
+        updateSidebarStats();
+      }
+    }
+    
+    function updateAccountIndicators(accountId) {
+      const container = document.getElementById('accountIndicators');
+      if (!accountId) {
+        container.innerHTML = '';
+        return;
+      }
+      
+      const account = accounts.find(a => a.id === accountId);
+      const accountFlows = allFlows.filter(f => f.account_id === accountId);
+      const accountWebhooks = allWebhooks.filter(w => w.account_id === accountId);
+      const hasActiveFlow = accountFlows.some(f => f.is_active);
+      const hasActiveWebhook = accountWebhooks.some(w => w.is_active);
+      
+      container.innerHTML = `
+        <div class="indicator ${account?.status === 'ready' ? 'active' : ''}">
+          <i class="fas fa-circle" style="font-size: 6px;"></i>
+          ${account?.status === 'ready' ? 'Connected' : account?.status || 'Unknown'}
+        </div>
+        <div class="indicator ${hasActiveFlow ? 'active' : ''}">
+          <i class="fas fa-robot"></i>
+          ${accountFlows.length} flow${accountFlows.length !== 1 ? 's' : ''}
+        </div>
+        <div class="indicator ${hasActiveWebhook ? 'active' : ''}">
+          <i class="fas fa-link"></i>
+          ${accountWebhooks.length} webhook${accountWebhooks.length !== 1 ? 's' : ''}
+        </div>
+      `;
+    }
+    
+    function updateWebhooksInfo(accountId) {
+      const container = document.getElementById('webhooksInfo');
+      
+      if (!accountId) {
+        container.innerHTML = '<p style="font-size: 11px; color: var(--text-muted);">Select an account to view webhooks</p>';
+        return;
+      }
+      
+      const accountWebhooks = allWebhooks.filter(w => w.account_id === accountId);
+      
+      if (accountWebhooks.length === 0) {
+        container.innerHTML = '<p style="font-size: 11px; color: var(--text-muted);">No webhooks configured</p>';
+        return;
+      }
+      
+      container.innerHTML = accountWebhooks.map(w => `
+        <div class="webhook-item">
+          <span class="url" title="${w.url || ''}">${truncateUrl(w.url || 'No URL')}</span>
+          <span class="status ${w.is_active ? 'active' : 'inactive'}">${w.is_active ? 'Active' : 'Inactive'}</span>
+        </div>
+      `).join('');
+    }
+    
+    function updateFlowWebhookInfo() {
+      const container = document.getElementById('flowWebhookInfo');
+      
+      if (!currentFlow) {
+        container.innerHTML = '<p style="font-size: 11px; color: var(--text-muted);">Load a flow to configure its webhook</p>';
+        return;
+      }
+      
+      const webhookUrl = currentFlow.webhook_url;
+      
+      container.innerHTML = `
+        <div class="form-group" style="margin-bottom: 8px;">
+          <input type="url" id="flowWebhookUrl" value="${webhookUrl || ''}" 
+                 placeholder="https://your-server.com/leads"
+                 style="width: 100%; padding: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 11px;">
+        </div>
+        <button class="export-btn" onclick="saveFlowWebhook()" style="width: 100%;">
+          <i class="fas fa-save"></i> Save Webhook
+        </button>
+      `;
+    }
+    
+    async function saveFlowWebhook() {
+      if (!currentFlow) {
+        showToast('No flow loaded', 'error');
+        return;
+      }
+      
+      const webhookUrl = document.getElementById('flowWebhookUrl').value.trim();
+      
+      try {
+        const res = await fetch(API + '/flows/' + currentFlow.id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ webhook_url: webhookUrl || null })
+        });
+        
+        if (!res.ok) {
+          throw new Error('Failed to update webhook');
+        }
+        
+        currentFlow.webhook_url = webhookUrl || null;
+        showToast('Flow webhook saved!', 'success');
+      } catch (e) {
+        console.error('[FlowBuilder] Failed to save webhook:', e);
+        showToast('Failed to save webhook', 'error');
+      }
+    }
+    
+    function truncateUrl(url) {
+      if (url.length <= 25) return url;
+      return url.substring(0, 22) + '...';
+    }
+    
+    function goToWebhooks() {
+      const accountId = document.getElementById('accountFilter').value;
+      if (accountId) {
+        window.location.href = `/dashboard?tab=webhooks&account=${accountId}`;
+      } else {
+        window.location.href = '/dashboard?tab=webhooks';
+      }
+    }
+    
+    // ========== EXPORT/IMPORT ==========
+    function exportFlowJSON() {
+      if (!currentFlow) {
+        showToast('No flow is currently loaded', 'error');
+        return;
+      }
+      
+      const exportData = {
+        name: currentFlow.name,
+        description: currentFlow.description,
+        trigger_type: currentFlow.trigger_type,
+        trigger_keywords: currentFlow.trigger_keywords,
+        flow_type: currentFlow.flow_type,
+        nodes: nodes,
+        connections: connections,
+        exported_at: new Date().toISOString()
+      };
+      
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${currentFlow.name.replace(/[^a-z0-9]/gi, '_')}_flow.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showToast('Flow exported successfully');
+    }
+    
+    function importFlowJSON() {
+      document.getElementById('importFileInput').click();
+    }
+    
+    function handleImportFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const importData = JSON.parse(e.target.result);
+          
+          if (!importData.nodes || !Array.isArray(importData.nodes)) {
+            showToast('Invalid flow file: missing nodes', 'error');
+            return;
+          }
+          
+          // Apply imported nodes and connections to canvas
+          if (currentFlow) {
+            nodes = importData.nodes;
+            connections = importData.connections || [];
+            renderCanvas();
+            showToast('Flow imported! Remember to save.');
+          } else {
+            showToast('Please create or load a flow first', 'error');
+          }
+        } catch (err) {
+          showToast('Failed to parse import file', 'error');
+          console.error(err);
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = ''; // Reset file input
+    }
+    
+    async function loadAccounts() {
+      try {
+        console.log('[FlowBuilder] Loading accounts...');
+        const res = await fetch('/api/accounts', { credentials: 'include' });
+        if (res.ok) {
+          accounts = await res.json();
+          console.log('[FlowBuilder] Loaded', accounts.length, 'accounts');
+          populateAccountSelect();
+        } else {
+          console.error('[FlowBuilder] Failed to load accounts:', res.status, res.statusText);
+          showToast('Failed to load accounts', 'error');
+        }
+      } catch (e) {
+        console.error('[FlowBuilder] Failed to load accounts:', e);
+        showToast('Failed to load accounts', 'error');
+      }
+    }
+    
+    function populateAccountSelect() {
+      const select = document.getElementById('newFlowAccount');
+      if (!select) {
+        console.error('[FlowBuilder] newFlowAccount select not found');
+        return;
+      }
+      select.innerHTML = '<option value="">Select an account...</option>' +
+        accounts.map(a => `<option value="${a.id}">${a.name} (${a.phone_number || 'Not connected'})</option>`).join('');
+    }
+    
+    function toggleKeywordsField() {
+      const type = document.getElementById('newFlowTriggerType').value;
+      document.getElementById('keywordsGroup').style.display = type === 'all' ? 'none' : 'block';
+    }
+    
+    // ========== NODE PALETTE ==========
+    function renderNodePalette() {
+      const palette = document.getElementById('nodePalette');
+      
+      // Group nodes by category
+      const coreNodes = nodeTypes.filter(nt => nt.category === 'core');
+      const advancedNodes = nodeTypes.filter(nt => nt.category === 'advanced');
+      
+      let html = '<div class="palette-section"><h3 style="font-size: 11px; color: var(--primary); margin-bottom: 8px; text-transform: uppercase;">Essential Nodes</h3>';
+      html += coreNodes.map(nt => `
+        <div class="palette-node" onclick="addNodeToCanvas('${nt.type}')" title="${nt.desc}">
+          <div class="icon" style="background: ${nt.color}">
+            <i class="fas fa-${nt.icon}"></i>
+          </div>
+          <div class="info">
+            <h4>${nt.label}</h4>
+            <p>${nt.desc}</p>
+          </div>
+        </div>
+      `).join('');
+      html += '</div>';
+      
+      if (advancedNodes.length > 0) {
+        html += '<div class="palette-section" style="margin-top: 16px;"><h3 style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase;">Advanced Nodes</h3>';
+        html += advancedNodes.map(nt => `
+          <div class="palette-node" onclick="addNodeToCanvas('${nt.type}')" title="${nt.desc}">
+            <div class="icon" style="background: ${nt.color}">
+              <i class="fas fa-${nt.icon}"></i>
+            </div>
+            <div class="info">
+              <h4>${nt.label}</h4>
+              <p>${nt.desc}</p>
+            </div>
+          </div>
+        `).join('');
+        html += '</div>';
+      }
+      
+      palette.innerHTML = html;
+    }
+    
+    // Generate UUID v4
+    function generateUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+    
+    function addNodeToCanvas(type) {
+      if (!currentFlow) {
+        showToast('Please create or load a flow first!', 'error');
+        return;
+      }
+      
+      const nt = nodeTypes.find(t => t.type === type);
+      const container = document.getElementById('canvasContainer');
+      
+      // Position in center of visible area
+      const x = container.scrollLeft + container.clientWidth / 2 - 80 + (Math.random() * 100 - 50);
+      const y = container.scrollTop + container.clientHeight / 2 - 40 + (Math.random() * 100 - 50);
+      
+      const node = {
+        id: generateUUID(),
+        node_type: type,
+        name: nt.label,
+        position_x: Math.round(x),
+        position_y: Math.round(y),
+        config: getDefaultConfig(type)
+      };
+      
+      nodes.push(node);
+      renderCanvas();
+      selectNode(node.id);
+      hideCanvasHint();
+    }
+    
+    function getDefaultConfig(type) {
+      switch (type) {
+        case 'start': 
+          return { keywords: currentFlow?.trigger_keywords || [] };
+        case 'message': 
+          return { message: '' };
+        case 'collect': 
+          // AI-powered data collection node - just define field, AI does the rest
+          return { 
+            field: '',           // Variable name (e.g., 'name', 'phone', 'email')
+            label: '',           // Display label (optional)
+            fieldType: 'name',   // Type: name, phone, email, text, number, address, date
+            question: '',        // Optional custom question (AI generates if empty)
+            required: true
+          };
+        case 'condition': 
+          return { variable: 'message', operator: 'contains', value: '' };
+        case 'api': 
+          return { method: 'GET', url: '', headers: {}, body: '', responseVariable: 'api_response' };
+        case 'end': 
+          return { message: '' };
+        // Legacy support
+        case 'buttons': 
+          return { message: '', options: [] };
+        case 'input': 
+          return { prompt: '', variable: 'user_input' };
+        case 'ai_question': 
+          return { field: '', label: '', question: '', fieldType: 'text', validation: {} };
+        case 'delay': 
+          return { seconds: 2 };
+        default: 
+          return {};
+      }
+    }
+    
+    // ========== CANVAS RENDERING ==========
+    function renderCanvas() {
+      const canvas = document.getElementById('canvas');
+      
+      // Clear existing nodes
+      canvas.querySelectorAll('.flow-node').forEach(el => el.remove());
+      
+      // Render nodes
+      nodes.forEach(node => {
+        const nt = nodeTypes.find(t => t.type === node.node_type);
+        const el = document.createElement('div');
+        el.className = 'flow-node' + (selectedNodeId === node.id ? ' selected' : '');
+        el.id = node.id;
+        el.style.left = node.position_x + 'px';
+        el.style.top = node.position_y + 'px';
+        
+        el.innerHTML = `
+          <div class="flow-node-header">
+            <div class="icon" style="background: ${nt?.color || '#666'}">
+              <i class="fas fa-${nt?.icon || 'cube'}"></i>
+            </div>
+            <span class="title">${node.name}</span>
+          </div>
+          <div class="flow-node-body">${getNodePreview(node)}</div>
+          ${node.node_type !== 'start' ? '<div class="handle handle-in" data-handle="in"></div>' : ''}
+          ${node.node_type !== 'end' ? '<div class="handle handle-out" data-handle="out"></div>' : ''}
+        `;
+        
+        // Node click to select
+        el.addEventListener('click', (e) => {
+          if (!e.target.classList.contains('handle')) {
+            selectNode(node.id);
+          }
+        });
+        
+        // Node drag
+        el.addEventListener('mousedown', (e) => {
+          if (e.target.classList.contains('handle')) return;
+          e.preventDefault();
+          draggedNode = node;
+          const rect = el.getBoundingClientRect();
+          dragOffset = {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+          };
+        });
+        
+        // Handle mousedown for connections
+        el.querySelectorAll('.handle').forEach(handle => {
+          handle.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            if (handle.dataset.handle === 'out') {
+              startConnection(node.id, e);
+            }
+          });
+        });
+        
+        canvas.appendChild(el);
+      });
+      
+      renderConnections();
+    }
+    
+    function getNodePreview(node) {
+      const c = node.config || {};
+      switch (node.node_type) {
+        case 'start': 
+          return 'Triggers flow';
+        case 'message': 
+          return c.message?.substring(0, 40) || 'Configure message...';
+        case 'collect':
+          // AI Collect Data node
+          const fieldName = c.label || c.field || '';
+          return fieldName ? `🧠 Collect: ${fieldName}` : '🧠 Configure field...';
+        // Legacy node types (still supported)
+        case 'buttons': 
+          return (c.options?.length || 0) + ' button(s)';
+        case 'input': 
+          return '→ $' + (c.variable || 'user_input');
+        case 'ai_question': 
+          return '🧠 ' + (c.label || c.field || 'Configure...');
+        case 'condition': 
+          return `If ${c.variable || '...'} ${c.operator || '...'} ${c.value || '...'}`;
+        case 'api': 
+          return (c.method || 'GET') + ' ' + (c.url?.substring(0, 20) || '...');
+        case 'delay': 
+          return (c.seconds || 1) + ' second(s)';
+        case 'end': 
+          return c.message?.substring(0, 30) || 'Ends flow & sends data';
+        default: 
+          return '';
+      }
+    }
+    
+    function hideCanvasHint() {
+      document.getElementById('canvasHint').style.display = 'none';
+    }
+    
+    function showCanvasHint() {
+      document.getElementById('canvasHint').style.display = 'block';
+    }
+    
+    // ========== CONNECTIONS ==========
+    function renderConnections() {
+      const svg = document.getElementById('connectionsSvg');
+      // Keep temp line if exists
+      const tempLineEl = svg.querySelector('.temp');
+      svg.innerHTML = '';
+      if (tempLineEl) svg.appendChild(tempLineEl);
+      
+      connections.forEach(conn => {
+        const sourceEl = document.getElementById(conn.source_node_id);
+        const targetEl = document.getElementById(conn.target_node_id);
+        if (!sourceEl || !targetEl) return;
+        
+        const sourceHandle = sourceEl.querySelector('.handle-out');
+        const targetHandle = targetEl.querySelector('.handle-in');
+        if (!sourceHandle || !targetHandle) return;
+        
+        const canvas = document.getElementById('canvas');
+        const canvasRect = canvas.getBoundingClientRect();
+        
+        const sourceRect = sourceHandle.getBoundingClientRect();
+        const targetRect = targetHandle.getBoundingClientRect();
+        
+        const x1 = sourceRect.left - canvasRect.left + sourceRect.width / 2;
+        const y1 = sourceRect.top - canvasRect.top + sourceRect.height / 2;
+        const x2 = targetRect.left - canvasRect.left + targetRect.width / 2;
+        const y2 = targetRect.top - canvasRect.top + targetRect.height / 2;
+        
+        const path = createConnectionPath(x1, y1, x2, y2);
+        path.addEventListener('click', () => {
+          if (confirm('Delete this connection?')) {
+            connections = connections.filter(c => c !== conn);
+            renderConnections();
+          }
+        });
+        path.style.pointerEvents = 'stroke';
+        path.style.cursor = 'pointer';
+        svg.appendChild(path);
+      });
+    }
+    
+    function createConnectionPath(x1, y1, x2, y2, isTemp = false) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const midY = (y1 + y2) / 2;
+      const controlOffset = Math.min(Math.abs(y2 - y1) / 2, 80);
+      path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${y1 + controlOffset}, ${x2} ${y2 - controlOffset}, ${x2} ${y2}`);
+      path.classList.add('connection-line');
+      if (isTemp) path.classList.add('temp');
+      return path;
+    }
+    
+    function startConnection(nodeId, e) {
+      isDrawingConnection = true;
+      connectionStart = nodeId;
+      
+      const canvas = document.getElementById('canvas');
+      const svg = document.getElementById('connectionsSvg');
+      const sourceEl = document.getElementById(nodeId);
+      const handle = sourceEl.querySelector('.handle-out');
+      const canvasRect = canvas.getBoundingClientRect();
+      const handleRect = handle.getBoundingClientRect();
+      
+      const x1 = handleRect.left - canvasRect.left + handleRect.width / 2;
+      const y1 = handleRect.top - canvasRect.top + handleRect.height / 2;
+      
+      tempLine = createConnectionPath(x1, y1, x1, y1, true);
+      svg.appendChild(tempLine);
+    }
+    
+    function updateTempConnection(e) {
+      if (!isDrawingConnection || !tempLine) return;
+      
+      const canvas = document.getElementById('canvas');
+      const svg = document.getElementById('connectionsSvg');
+      const sourceEl = document.getElementById(connectionStart);
+      const handle = sourceEl.querySelector('.handle-out');
+      const canvasRect = canvas.getBoundingClientRect();
+      const handleRect = handle.getBoundingClientRect();
+      
+      const x1 = handleRect.left - canvasRect.left + handleRect.width / 2;
+      const y1 = handleRect.top - canvasRect.top + handleRect.height / 2;
+      const x2 = e.clientX - canvasRect.left;
+      const y2 = e.clientY - canvasRect.top;
+      
+      const midY = (y1 + y2) / 2;
+      const controlOffset = Math.min(Math.abs(y2 - y1) / 2, 80);
+      tempLine.setAttribute('d', `M ${x1} ${y1} C ${x1} ${y1 + controlOffset}, ${x2} ${y2 - controlOffset}, ${x2} ${y2}`);
+    }
+    
+    function endConnection(e) {
+      if (!isDrawingConnection) return;
+      
+      // Check if dropped on an input handle
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      if (target && target.classList.contains('handle-in')) {
+        const targetNode = target.closest('.flow-node');
+        if (targetNode && targetNode.id !== connectionStart) {
+          // Check if connection already exists
+          const exists = connections.find(c => 
+            c.source_node_id === connectionStart && c.target_node_id === targetNode.id
+          );
+          if (!exists) {
+            connections.push({
+              source_node_id: connectionStart,
+              target_node_id: targetNode.id
+            });
+          }
+        }
+      }
+      
+      // Cleanup
+      isDrawingConnection = false;
+      connectionStart = null;
+      if (tempLine) {
+        tempLine.remove();
+        tempLine = null;
+      }
+      renderConnections();
+    }
+    
+    // ========== CANVAS EVENTS ==========
+    function setupCanvasEvents() {
+      const container = document.getElementById('canvasContainer');
+      
+      document.addEventListener('mousemove', (e) => {
+        // Node dragging
+        if (draggedNode) {
+          const canvas = document.getElementById('canvas');
+          const canvasRect = canvas.getBoundingClientRect();
+          const x = e.clientX - canvasRect.left - dragOffset.x;
+          const y = e.clientY - canvasRect.top - dragOffset.y;
+          
+          draggedNode.position_x = Math.max(0, Math.round(x));
+          draggedNode.position_y = Math.max(0, Math.round(y));
+          
+          const el = document.getElementById(draggedNode.id);
+          if (el) {
+            el.style.left = draggedNode.position_x + 'px';
+            el.style.top = draggedNode.position_y + 'px';
+          }
+          renderConnections();
+        }
+        
+        // Connection drawing
+        if (isDrawingConnection) {
+          updateTempConnection(e);
+        }
+      });
+      
+      document.addEventListener('mouseup', (e) => {
+        if (draggedNode) {
+          draggedNode = null;
+        }
+        if (isDrawingConnection) {
+          endConnection(e);
+        }
+      });
+      
+      // Click on canvas to deselect
+      container.addEventListener('click', (e) => {
+        if (e.target === container || e.target.id === 'canvas' || e.target.id === 'connectionsSvg') {
+          selectNode(null);
+        }
+      });
+    }
+    
+    // ========== NODE SELECTION & PROPERTIES ==========
+    function selectNode(nodeId) {
+      selectedNodeId = nodeId;
+      renderCanvas();
+      renderProperties();
+    }
+    
+    function renderProperties() {
+      const panel = document.getElementById('propertiesPanel');
+      
+      if (!selectedNodeId) {
+        panel.innerHTML = `
+          <div class="properties-empty">
+            <i class="fas fa-mouse-pointer"></i>
+            <p>Click a node to configure it</p>
+          </div>
+        `;
+        return;
+      }
+      
+      const node = nodes.find(n => n.id === selectedNodeId);
+      if (!node) return;
+      
+      const nt = nodeTypes.find(t => t.type === node.node_type);
+      let html = `
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
+          <div class="icon" style="background: ${nt?.color}; width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+            <i class="fas fa-${nt?.icon}" style="color: white; font-size: 14px;"></i>
+          </div>
+          <div>
+            <strong>${nt?.label}</strong>
+            <div style="font-size: 11px; color: var(--text-muted);">${nt?.desc}</div>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label>Node Label</label>
+          <input type="text" value="${node.name}" onchange="updateNode('name', this.value)">
+        </div>
+      `;
+      
+      // Type-specific fields
+      switch (node.node_type) {
+        case 'start':
+          html += `
+            <div class="form-group">
+              <label>Trigger Keywords</label>
+              <input type="text" value="${(node.config.keywords || []).join(', ')}" 
+                     onchange="updateNodeConfig('keywords', this.value.split(',').map(s=>s.trim()).filter(Boolean))">
+              <small>Comma-separated. Flow triggers when message contains any keyword.</small>
+            </div>
+          `;
+          break;
+          
+        case 'message':
+          html += `
+            <div class="form-group">
+              <label>Message Text</label>
+              <textarea onchange="updateNodeConfig('message', this.value)">${node.config.message || ''}</textarea>
+              <small>Use {{variable}} for dynamic values, e.g., "Hello {{name}}!"</small>
+            </div>
+          `;
+          break;
+          
+        case 'buttons':
+          html += `
+            <div class="form-group">
+              <label>Prompt Message</label>
+              <textarea onchange="updateNodeConfig('message', this.value)">${node.config.message || ''}</textarea>
+            </div>
+            <div class="form-group">
+              <label>Button Options</label>
+              <div class="options-list">
+                ${(node.config.options || []).map((opt, i) => `
+                  <div class="option-item">
+                    <input type="text" value="${opt.text}" placeholder="Button text" 
+                           onchange="updateOption(${i}, this.value)">
+                    <button class="btn-remove" onclick="removeOption(${i})">✕</button>
+                  </div>
+                `).join('')}
+              </div>
+              <button class="btn-add" onclick="addOption()">+ Add Button</button>
+            </div>
+          `;
+          break;
+          
+        case 'input':
+          html += `
+            <div class="form-group">
+              <label>Prompt Message</label>
+              <textarea onchange="updateNodeConfig('prompt', this.value)">${node.config.prompt || ''}</textarea>
+              <small>What to ask the user</small>
+            </div>
+            <div class="form-group">
+              <label>Save Response As Variable</label>
+              <input type="text" value="${node.config.variable || 'user_input'}" 
+                     onchange="updateNodeConfig('variable', this.value)">
+              <small>Use {{variable_name}} later in messages</small>
+            </div>
+          `;
+          break;
+          
+        case 'condition':
+          html += `
+            <div class="form-group">
+              <label>Check Variable</label>
+              <input type="text" value="${node.config.variable || 'message'}" 
+                     onchange="updateNodeConfig('variable', this.value)">
+            </div>
+            <div class="form-group">
+              <label>Operator</label>
+              <select onchange="updateNodeConfig('operator', this.value)">
+                <option value="contains" ${node.config.operator === 'contains' ? 'selected' : ''}>Contains</option>
+                <option value="equals" ${node.config.operator === 'equals' ? 'selected' : ''}>Equals</option>
+                <option value="starts_with" ${node.config.operator === 'starts_with' ? 'selected' : ''}>Starts with</option>
+                <option value="ends_with" ${node.config.operator === 'ends_with' ? 'selected' : ''}>Ends with</option>
+                <option value="greater_than" ${node.config.operator === 'greater_than' ? 'selected' : ''}>Greater than</option>
+                <option value="less_than" ${node.config.operator === 'less_than' ? 'selected' : ''}>Less than</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Value to Compare</label>
+              <input type="text" value="${node.config.value || ''}" 
+                     onchange="updateNodeConfig('value', this.value)">
+            </div>
+          `;
+          break;
+          
+        case 'api':
+          html += `
+            <div class="form-group">
+              <label>HTTP Method</label>
+              <select onchange="updateNodeConfig('method', this.value)">
+                <option value="GET" ${node.config.method === 'GET' ? 'selected' : ''}>GET</option>
+                <option value="POST" ${node.config.method === 'POST' ? 'selected' : ''}>POST</option>
+                <option value="PUT" ${node.config.method === 'PUT' ? 'selected' : ''}>PUT</option>
+                <option value="DELETE" ${node.config.method === 'DELETE' ? 'selected' : ''}>DELETE</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>URL</label>
+              <input type="text" value="${node.config.url || ''}" 
+                     placeholder="https://api.example.com/endpoint"
+                     onchange="updateNodeConfig('url', this.value)">
+            </div>
+            <div class="form-group">
+              <label>Request Body (JSON)</label>
+              <textarea onchange="updateNodeConfig('body', this.value)">${node.config.body || ''}</textarea>
+            </div>
+            <div class="form-group">
+              <label>Save Response To Variable</label>
+              <input type="text" value="${node.config.responseVariable || 'api_response'}" 
+                     onchange="updateNodeConfig('responseVariable', this.value)">
+            </div>
+          `;
+          break;
+          
+        case 'delay':
+          html += `
+            <div class="form-group">
+              <label>Wait Time (seconds)</label>
+              <input type="number" min="1" max="60" value="${node.config.seconds || 2}" 
+                     onchange="updateNodeConfig('seconds', parseInt(this.value))">
+            </div>
+          `;
+          break;
+        
+        case 'collect':
+          // New unified AI data collection node
+          html += `
+            <div style="padding: 12px; background: rgba(236, 72, 153, 0.1); border: 1px solid rgba(236, 72, 153, 0.3); border-radius: 8px; margin-bottom: 14px;">
+              <div style="font-size: 12px; color: #f472b6; font-weight: 600;"><i class="fas fa-brain"></i> AI-Powered Data Collection</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                Just define the field - AI handles questions, validation, and extraction automatically!
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label>Field Name (variable) *</label>
+              <input type="text" value="${node.config.field || ''}" 
+                     placeholder="e.g., name, phone, email, company"
+                     onchange="updateNodeConfig('field', this.value)">
+              <small>Data saved as <code style="background: var(--card); padding: 1px 4px; border-radius: 3px;">{{${node.config.field || 'field_name'}}}</code></small>
+            </div>
+            
+            <div class="form-group">
+              <label>Display Label</label>
+              <input type="text" value="${node.config.label || ''}" 
+                     placeholder="e.g., Full Name, Phone Number (optional)"
+                     onchange="updateNodeConfig('label', this.value)">
+              <small>Human-readable name for collected data display</small>
+            </div>
+            
+            <div class="form-group">
+              <label>Data Type *</label>
+              <select onchange="updateNodeConfig('fieldType', this.value)">
+                <option value="name" ${node.config.fieldType === 'name' ? 'selected' : ''}>👤 Person Name</option>
+                <option value="phone" ${node.config.fieldType === 'phone' ? 'selected' : ''}>📱 Phone Number</option>
+                <option value="email" ${node.config.fieldType === 'email' ? 'selected' : ''}>📧 Email Address</option>
+                <option value="text" ${node.config.fieldType === 'text' ? 'selected' : ''}>📝 Text (any)</option>
+                <option value="number" ${node.config.fieldType === 'number' ? 'selected' : ''}>🔢 Number</option>
+                <option value="address" ${node.config.fieldType === 'address' ? 'selected' : ''}>📍 Address</option>
+                <option value="date" ${node.config.fieldType === 'date' ? 'selected' : ''}>📅 Date</option>
+              </select>
+              <small>AI validates and extracts based on this type</small>
+            </div>
+            
+            <details style="margin-top: 12px;">
+              <summary style="cursor: pointer; color: var(--text-muted); font-size: 12px;">
+                <i class="fas fa-cog"></i> Advanced Options (optional)
+              </summary>
+              <div style="margin-top: 10px; padding: 10px; background: var(--card); border-radius: 6px;">
+                <div class="form-group">
+                  <label>Custom Question (optional)</label>
+                  <textarea onchange="updateNodeConfig('question', this.value)" 
+                            placeholder="Leave empty for AI to generate automatically"
+                            style="min-height: 60px;">${node.config.question || ''}</textarea>
+                  <small>Override AI-generated question with your own</small>
+                </div>
+                
+                <div class="form-group">
+                  <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" ${node.config.required !== false ? 'checked' : ''} 
+                           onchange="updateNodeConfig('required', this.checked)">
+                    Required field
+                  </label>
+                </div>
+              </div>
+            </details>
+          `;
+          break;
+          
+        case 'ai_question':
+          html += `
+            <div class="form-group">
+              <label>Field Name (variable) *</label>
+              <input type="text" value="${node.config.field || ''}" 
+                     placeholder="e.g., phone, email, name"
+                     onchange="updateNodeConfig('field', this.value)">
+              <small>Data will be saved as {{field_name}}</small>
+            </div>
+            <div class="form-group">
+              <label>Display Label *</label>
+              <input type="text" value="${node.config.label || ''}" 
+                     placeholder="e.g., Phone Number, Email Address"
+                     onchange="updateNodeConfig('label', this.value)">
+              <small>Human-readable name for this field</small>
+            </div>
+            <div class="form-group">
+              <label>Question Prompt *</label>
+              <textarea onchange="updateNodeConfig('question', this.value)" placeholder="e.g., Could you please share your phone number?">${node.config.question || ''}</textarea>
+              <small>The message sent to ask for this information</small>
+            </div>
+            <div class="form-group">
+              <label>Field Type</label>
+              <select onchange="updateNodeConfig('fieldType', this.value)">
+                <option value="text" ${node.config.fieldType === 'text' ? 'selected' : ''}>Text (any)</option>
+                <option value="phone" ${node.config.fieldType === 'phone' ? 'selected' : ''}>Phone Number</option>
+                <option value="email" ${node.config.fieldType === 'email' ? 'selected' : ''}>Email Address</option>
+                <option value="name" ${node.config.fieldType === 'name' ? 'selected' : ''}>Person Name</option>
+                <option value="number" ${node.config.fieldType === 'number' ? 'selected' : ''}>Number</option>
+                <option value="date" ${node.config.fieldType === 'date' ? 'selected' : ''}>Date</option>
+                <option value="address" ${node.config.fieldType === 'address' ? 'selected' : ''}>Address</option>
+              </select>
+              <small>AI will validate based on type</small>
+            </div>
+            <div style="padding: 10px; background: rgba(236, 72, 153, 0.1); border: 1px solid rgba(236, 72, 153, 0.3); border-radius: 6px; margin-top: 8px;">
+              <div style="font-size: 11px; color: #f472b6;"><i class="fas fa-brain"></i> AI-Powered</div>
+              <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">
+                AI extracts data from natural language responses, handles objections, and validates input automatically.
+              </div>
+            </div>
+          `;
+          break;
+          
+        case 'end':
+          html += `
+            <div class="form-group">
+              <label>Goodbye Message (optional)</label>
+              <textarea onchange="updateNodeConfig('message', this.value)">${node.config.message || ''}</textarea>
+            </div>
+          `;
+          break;
+      }
+      
+      // Delete button
+      html += `
+        <button class="btn-delete-node" onclick="deleteNode()">
+          <i class="fas fa-trash"></i> Delete Node
+        </button>
+      `;
+      
+      panel.innerHTML = html;
+    }
+    
+    function updateNode(key, value) {
+      const node = nodes.find(n => n.id === selectedNodeId);
+      if (node) {
+        node[key] = value;
+        renderCanvas();
+      }
+    }
+    
+    function updateNodeConfig(key, value) {
+      const node = nodes.find(n => n.id === selectedNodeId);
+      if (node) {
+        node.config[key] = value;
+        renderCanvas();
+      }
+    }
+    
+    function addOption() {
+      const node = nodes.find(n => n.id === selectedNodeId);
+      if (node) {
+        node.config.options = node.config.options || [];
+        const optionNum = node.config.options.length + 1;
+        const optionText = 'Option ' + optionNum;
+        // Include both text and label for compatibility
+        node.config.options.push({ 
+          text: optionText, 
+          label: optionText, 
+          value: 'opt' + node.config.options.length 
+        });
+        renderProperties();
+        renderCanvas();
+      }
+    }
+    
+    function updateOption(index, text) {
+      const node = nodes.find(n => n.id === selectedNodeId);
+      if (node && node.config.options?.[index]) {
+        // Store both text and label for compatibility with flowEngine
+        node.config.options[index].text = text;
+        node.config.options[index].label = text;
+        node.config.options[index].value = text.toLowerCase().replace(/\s+/g, '_');
+        renderCanvas();
+      }
+    }
+    
+    function removeOption(index) {
+      const node = nodes.find(n => n.id === selectedNodeId);
+      if (node && node.config.options) {
+        node.config.options.splice(index, 1);
+        renderProperties();
+        renderCanvas();
+      }
+    }
+    
+    function deleteNode() {
+      if (!selectedNodeId) return;
+      if (!confirm('Delete this node?')) return;
+      
+      nodes = nodes.filter(n => n.id !== selectedNodeId);
+      connections = connections.filter(c => 
+        c.source_node_id !== selectedNodeId && c.target_node_id !== selectedNodeId
+      );
+      selectNode(null);
+      
+      if (nodes.length === 0) showCanvasHint();
+    }
+    
+    // ========== ZOOM ==========
+    function zoomIn() {
+      zoom = Math.min(2, zoom + 0.1);
+      applyZoom();
+    }
+    
+    function zoomOut() {
+      zoom = Math.max(0.5, zoom - 0.1);
+      applyZoom();
+    }
+    
+    function resetView() {
+      zoom = 1;
+      applyZoom();
+      document.getElementById('canvasContainer').scrollTo(0, 0);
+    }
+    
+    function applyZoom() {
+      document.getElementById('canvas').style.transform = `scale(${zoom})`;
+      document.getElementById('canvas').style.transformOrigin = 'top left';
+    }
+    
+    // ========== FLOW MANAGEMENT ==========
+    function showFlowsModal() {
+      console.log('[FlowBuilder] Opening flows modal...');
+      const modal = document.getElementById('flowsModal');
+      if (!modal) {
+        console.error('[FlowBuilder] flowsModal not found');
+        return;
+      }
+      modal.classList.add('show');
+      loadFlowsList();
+    }
+    
+    function showNewFlowModal() {
+      console.log('[FlowBuilder] Opening new flow modal...');
+      const modal = document.getElementById('newFlowModal');
+      if (!modal) {
+        console.error('[FlowBuilder] newFlowModal not found');
+        return;
+      }
+      modal.classList.add('show');
+      populateAccountSelect();
+    }
+    
+    function closeModal(id) {
+      const modal = document.getElementById(id);
+      if (modal) {
+        modal.classList.remove('show');
+      }
+    }
+    
+    async function loadFlowsList() {
+      console.log('[FlowBuilder] Loading flows list...');
+      const list = document.getElementById('flowsList');
+      if (!list) {
+        console.error('[FlowBuilder] flowsList element not found');
+        return;
+      }
+      
+      list.innerHTML = '<p style="text-align: center; color: var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> Loading...</p>';
+      
+      try {
+        const res = await fetch(API + '/flows', { credentials: 'include' });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
+        const flows = await res.json();
+        console.log('[FlowBuilder] Loaded', flows?.length || 0, 'flows for list');
+        
+        if (!flows || flows.length === 0) {
+          list.innerHTML = '<p style="text-align: center; color: var(--text-muted);">No flows yet. Create your first one!</p>';
+          return;
+        }
+        
+        list.innerHTML = flows.map(f => {
+          const acc = accounts.find(a => a.id === f.account_id);
+          return `
+            <div class="flow-list-item">
+              <div>
+                <h4>${f.name} ${f.is_active ? '🟢' : '⚪'}</h4>
+                <p>Account: ${acc?.name || 'Unknown'} • Trigger: ${f.trigger_type}</p>
+              </div>
+              <div class="actions">
+                <button class="btn-load" onclick="loadFlow('${f.id}')">Edit</button>
+                <button class="btn-del" onclick="deleteFlow('${f.id}', event)"><i class="fas fa-trash"></i></button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error('[FlowBuilder] Failed to load flows:', e);
+        list.innerHTML = '<p style="text-align: center; color: #f87171;">Failed to load flows. Please try again.</p>';
+        showToast('Failed to load flows: ' + e.message, 'error');
+      }
+    }
+    
+    async function createFlow(e) {
+      e.preventDefault();
+      console.log('[FlowBuilder] Creating new flow...');
+      
+      const name = document.getElementById('newFlowName').value?.trim();
+      const description = document.getElementById('newFlowDesc').value?.trim() || '';
+      const account_id = document.getElementById('newFlowAccount').value;
+      const trigger_type = document.getElementById('newFlowTriggerType').value;
+      const keywords = document.getElementById('newFlowKeywords').value || '';
+      const is_active = document.getElementById('newFlowActive').checked;
+      
+      // AI flow configuration
+      const flow_type = document.getElementById('flowTypeAI')?.checked ? 'ai' : 'basic';
+      const llm_provider = document.getElementById('newFlowLLMProvider')?.value || null;
+      const llm_api_key = document.getElementById('newFlowLLMKey')?.value || null;
+      const llm_model = document.getElementById('newFlowLLMModel')?.value || null;
+      const llm_instructions = document.getElementById('newFlowLLMInstructions')?.value || '';
+      const llm_persona = document.getElementById('newFlowLLMPersona')?.value || '';
+      const llm_temperature = parseFloat(document.getElementById('newFlowLLMTemperature')?.value || '0.7');
+      const knowledge_base = document.getElementById('newFlowKnowledgeBase')?.value || '';
+      const use_shared_memory = document.getElementById('newFlowSharedMemory')?.checked || false;
+      const webhook_url = document.getElementById('newFlowWebhook')?.value || null;
+      
+      // Validation
+      if (!name) {
+        showToast('Please enter a flow name', 'error');
+        return;
+      }
+      
+      if (!account_id) {
+        showToast('Please select a WhatsApp account', 'error');
+        return;
+      }
+      
+      // Validate AI flow requirements
+      if (flow_type === 'ai' && (!llm_provider || !llm_api_key || !llm_model)) {
+        showToast('AI flows require LLM provider, API key, and model', 'error');
+        return;
+      }
+      
+      const payload = {
+        name,
+        description,
+        account_id,
+        trigger_type,
+        trigger_keywords: keywords.split(',').map(s => s.trim()).filter(Boolean),
+        is_active,
+        flow_type,
+        llm_provider,
+        llm_api_key,
+        llm_model,
+        llm_instructions,
+        llm_persona,
+        llm_temperature,
+        knowledge_base,
+        use_shared_memory,
+        webhook_url
+      };
+      
+      console.log('[FlowBuilder] Creating flow with payload:', { ...payload, llm_api_key: llm_api_key ? '[REDACTED]' : null });
+      
+      try {
+        const res = await fetch(API + '/flows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload)
+        });
+        
+        const flow = await res.json();
+        console.log('[FlowBuilder] Create flow response:', flow);
+        
+        if (!res.ok || flow.error) {
+          showToast(flow.error || 'Failed to create flow', 'error');
+          return;
+        }
+        
+        closeModal('newFlowModal');
+        document.getElementById('newFlowForm').reset();
+        selectFlowType('basic'); // Reset flow type selection
+        
+        // Refresh sidebar stats
+        await loadSidebarData();
+        
+        // Load the new flow
+        await loadFlow(flow.id);
+        showToast('Flow created! Start adding nodes.', 'success');
+      } catch (e) {
+        console.error('[FlowBuilder] Failed to create flow:', e);
+        showToast('Failed to create flow: ' + e.message, 'error');
+      }
+    }
+    
+    async function loadFlow(flowId) {
+      console.log('[FlowBuilder] Loading flow:', flowId);
+      try {
+        const res = await fetch(API + '/flows/' + flowId, { credentials: 'include' });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
+        currentFlow = await res.json();
+        console.log('[FlowBuilder] Flow loaded:', currentFlow.name, 'with', currentFlow.nodes?.length || 0, 'nodes');
+        
+        if (currentFlow.error) {
+          throw new Error(currentFlow.error);
+        }
+        
+        nodes = currentFlow.nodes || [];
+        connections = currentFlow.connections || [];
+        
+        // Update UI
+        const flowName = currentFlow.name + (currentFlow.flow_type === 'ai' ? ' 🧠' : '');
+        document.getElementById('flowNameDisplay').textContent = flowName;
+        document.getElementById('flowNameDisplay').classList.add('active');
+        document.getElementById('saveBtn').disabled = false;
+        
+        // Enable test button for all flows (not just AI flows)
+        const testBtn = document.getElementById('testBtn');
+        testBtn.disabled = false;
+        
+        // Enable node palette when flow is loaded
+        updateNodePaletteState(true);
+        
+        // Update flow webhook info in sidebar
+        updateFlowWebhookInfo();
+        
+        // Update account filter to match flow's account
+        if (currentFlow.account_id) {
+          document.getElementById('accountFilter').value = currentFlow.account_id;
+          filterByAccount();
+        }
+        
+        closeModal('flowsModal');
+        selectNode(null);
+        renderCanvas();
+        
+        if (nodes.length === 0) {
+          showCanvasHint();
+        } else {
+          hideCanvasHint();
+        }
+        
+        showToast('Flow loaded', 'success');
+      } catch (e) {
+        console.error('[FlowBuilder] Failed to load flow:', e);
+        showToast('Failed to load flow: ' + e.message, 'error');
+      }
+    }
+    
+    function updateNodePaletteState(enabled) {
+      const palette = document.getElementById('nodePalette');
+      const hint = document.getElementById('noFlowHint');
+      if (enabled) {
+        palette.classList.remove('disabled');
+        hint.classList.add('hidden');
+      } else {
+        palette.classList.add('disabled');
+        hint.classList.remove('hidden');
+      }
+    }
+
+    async function saveFlow() {
+      if (!currentFlow) {
+        showToast('No flow loaded', 'error');
+        return;
+      }
+      
+      try {
+        await fetch(API + '/flows/' + currentFlow.id + '/design', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ nodes, connections })
+        });
+        showToast('Flow saved!', 'success');
+      } catch (e) {
+        console.error('Failed to save flow:', e);
+        showToast('Failed to save flow', 'error');
+      }
+    }
+    
+    async function deleteFlow(flowId, e) {
+      e.stopPropagation();
+      if (!confirm('Delete this flow permanently?')) return;
+      
+      try {
+        await fetch(API + '/flows/' + flowId, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        if (currentFlow?.id === flowId) {
+          currentFlow = null;
+          nodes = [];
+          connections = [];
+          document.getElementById('flowNameDisplay').textContent = 'No flow loaded';
+          document.getElementById('flowNameDisplay').classList.remove('active');
+          document.getElementById('saveBtn').disabled = true;
+          renderCanvas();
+          showCanvasHint();
+        }
+        
+        loadFlowsList();
+        showToast('Flow deleted', 'success');
+      } catch (e) {
+        console.error('Failed to delete flow:', e);
+        showToast('Failed to delete flow', 'error');
+      }
+    }
+    
+    // ========== UTILITIES ==========
+    function showToast(message, type = 'success') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'toast show ' + type;
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Delete' && selectedNodeId) {
+        deleteNode();
+      }
+      if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        saveFlow();
+      }
+      if (e.key === 'Escape') {
+        selectNode(null);
+        closeModal('flowsModal');
+        closeModal('newFlowModal');
+      }
+    });
+    
+    // ========== TEST SIMULATION ==========
+    let testFlowActive = false;
+    let testChatbotEnabled = true;
+    
+    function showTestModal() {
+      if (!currentFlow) {
+        showToast('Please load a flow first', 'error');
+        return;
+      }
+      
+      // Check if the flow has nodes
+      if (!nodes || nodes.length === 0) {
+        showToast('Please add some nodes to your flow before testing', 'error');
+        return;
+      }
+      
+      // Check if there's a start node
+      const startNode = nodes.find(n => n.node_type === 'start');
+      if (!startNode) {
+        showToast('Please add a Start node to your flow', 'error');
+        return;
+      }
+      
+      document.getElementById('testModal').classList.add('show');
+      resetTestUI();
+      
+      // Show trigger words hint
+      const triggerHint = document.getElementById('triggerWordsHint');
+      if (currentFlow.trigger_keywords && currentFlow.trigger_keywords.length > 0) {
+        triggerHint.innerHTML = `<strong>Trigger words:</strong> ${currentFlow.trigger_keywords.join(', ')}`;
+      } else if (currentFlow.trigger_type === 'all') {
+        triggerHint.innerHTML = `<strong>Trigger:</strong> Any message will start the flow`;
+      } else {
+        triggerHint.innerHTML = `<strong>Note:</strong> No trigger keywords set`;
+      }
+    }
+    
+    function closeTestModal() {
+      document.getElementById('testModal').classList.remove('show');
+      resetTestSimulation();
+    }
+    
+    function resetTestUI() {
+      const triggerHint = currentFlow?.trigger_keywords?.length > 0 
+        ? `<strong>Trigger words:</strong> ${currentFlow.trigger_keywords.join(', ')}`
+        : currentFlow?.trigger_type === 'all' 
+          ? `<strong>Trigger:</strong> Any message starts the flow`
+          : `No trigger keywords set`;
+      
+      document.getElementById('testChatArea').innerHTML = `
+        <div style="text-align: center; color: var(--text-muted); padding: 30px;">
+          <i class="fas fa-comments" style="font-size: 40px; opacity: 0.3;"></i>
+          <p style="margin-top: 12px; font-size: 13px;">Start typing to test your flow and chatbot</p>
+          <p style="margin-top: 4px; font-size: 11px; color: var(--text-muted);" id="triggerWordsHint">${triggerHint}</p>
+        </div>
+      `;
+      document.getElementById('testMessageInput').value = '';
+      document.getElementById('testMessageInput').disabled = false;
+      document.getElementById('testSendBtn').disabled = false;
+      document.getElementById('testDataPanel').style.display = 'none';
+      simulationSessionId = null;
+      testFlowActive = false;
+      testChatbotEnabled = true;
+      updateTestStatus(false, 'idle');
+      document.getElementById('testMessageInput').focus();
+    }
+    
+    function updateTestStatus(flowActive, chatbotStatus) {
+      const flowIndicator = document.getElementById('flowStatusIndicator');
+      const chatbotIndicator = document.getElementById('chatbotStatusIndicator');
+      const triggerHint = document.getElementById('triggerHint');
+      
+      testFlowActive = flowActive;
+      
+      if (flowActive) {
+        flowIndicator.innerHTML = `
+          <span class="status-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #10b981; animation: pulse 1.5s infinite;"></span>
+          <span style="color: #10b981; font-weight: 500;">Flow Active</span>
+        `;
+        chatbotIndicator.innerHTML = `
+          <i class="fas fa-moon" style="font-size: 12px;"></i>
+          <span>Chatbot Sleeping</span>
+        `;
+        chatbotIndicator.style.color = '#f59e0b';
+        if (triggerHint) triggerHint.innerHTML = '<i class="fas fa-info-circle"></i> Flow is collecting data...';
+      } else if (chatbotStatus === 'awake' || chatbotStatus === 'idle') {
+        flowIndicator.innerHTML = `
+          <span class="status-dot" style="width: 10px; height: 10px; border-radius: 50%; background: ${chatbotStatus === 'awake' ? '#6b7280' : '#3b82f6'};"></span>
+          <span style="color: ${chatbotStatus === 'awake' ? '#6b7280' : '#3b82f6'};">${chatbotStatus === 'awake' ? 'Flow Completed' : 'Flow Idle'}</span>
+        `;
+        chatbotIndicator.innerHTML = `
+          <i class="fas fa-robot" style="font-size: 12px;"></i>
+          <span>Chatbot Active</span>
+        `;
+        chatbotIndicator.style.color = '#10b981';
+        if (triggerHint) {
+          const hint = currentFlow?.trigger_keywords?.length > 0 
+            ? `Type "${currentFlow.trigger_keywords[0]}" to start flow`
+            : currentFlow?.trigger_type === 'all' 
+              ? 'Any message starts the flow' 
+              : 'Chat with the chatbot';
+          triggerHint.innerHTML = `<i class="fas fa-lightbulb" style="color: #f59e0b;"></i> ${hint}`;
+        }
+      }
+    }
+    
+    async function sendTestMessage() {
+      const input = document.getElementById('testMessageInput');
+      const message = input.value.trim();
+      if (!message) return;
+      
+      input.value = '';
+      
+      // Clear the initial placeholder if this is the first message
+      const chatArea = document.getElementById('testChatArea');
+      if (chatArea.querySelector('[id="triggerWordsHint"]')) {
+        chatArea.innerHTML = '';
+      }
+      
+      addChatMessage('user', message);
+      
+      // Disable input while processing
+      input.disabled = true;
+      document.getElementById('testSendBtn').disabled = true;
+      
+      // Show typing indicator
+      const typingId = addTypingIndicator();
+      
+      try {
+        // Unified API call - handles both flow triggers and chatbot
+        const res = await fetch(API + '/flows/' + currentFlow.id + '/simulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ 
+            sessionId: simulationSessionId, 
+            message,
+            action: simulationSessionId ? 'continue' : 'message' // 'message' for new, 'continue' for ongoing
+          })
+        });
+        
+        const result = await res.json();
+        removeTypingIndicator(typingId);
+        
+        if (result.error) {
+          addSystemMessage('Error: ' + result.error, 'error');
+          input.disabled = false;
+          document.getElementById('testSendBtn').disabled = false;
+          input.focus();
+          return;
+        }
+        
+        // Update session ID if flow started
+        if (result.sessionId) {
+          simulationSessionId = result.sessionId;
+        }
+        
+        // Update status indicators based on flow state
+        if (result.flowTriggered) {
+          addSystemMessage('Flow triggered!', 'success');
+          updateTestStatus(true, 'sleeping');
+        } else if (result.isFlowActive) {
+          // Flow is still active
+          updateTestStatus(true, 'sleeping');
+        } else if (!result.isFlowActive && !result.flowTriggered) {
+          // No flow active - chatbot is responding
+          updateTestStatus(false, 'awake');
+        }
+        
+        // Show execution log with step-by-step nodes
+        if (result.executionLog && result.executionLog.length > 0) {
+          result.executionLog.forEach(log => {
+            if (log.type === 'node') {
+              addNodeExecutionStep(log.content.replace('Executing: ', ''), log.nodeType);
+            }
+          });
+        }
+        
+        // Show bot messages (from flow)
+        if (result.messages && result.messages.length > 0) {
+          result.messages.forEach(msg => addChatMessage('bot', msg));
+        } else if (result.response && result.response.trim()) {
+          addChatMessage('bot', result.response);
+        }
+        
+        // Show chatbot response (when no flow active)
+        if (result.chatbotResponse) {
+          addChatMessage('bot', result.chatbotResponse);
+        } else if (!result.flowTriggered && !result.isFlowActive && !result.messages?.length) {
+          // No chatbot configured and flow not triggered
+          addSystemMessage('No chatbot configured. Type a trigger keyword to start the flow.', 'info');
+        }
+        
+        // Update collected data if flow is active
+        if (result.collectedData && Object.keys(result.collectedData).length > 0) {
+          updateCollectedData(result.collectedData);
+        }
+        
+        // Show current node info
+        if (result.currentNode && !result.isComplete) {
+          addNodeExecutionStep(result.currentNode.name || result.currentNode.type, result.currentNode.type);
+        }
+        
+        // Check if flow completed
+        if (result.isComplete) {
+          addSystemMessage('Flow completed successfully!', 'success');
+          updateTestStatus(false, 'awake');
+          addSystemMessage('Chatbot is now active again', 'info');
+          
+          // Show collected data summary
+          if (result.collectedData && Object.keys(result.collectedData).length > 0) {
+            addSystemMessage('Collected Data:', 'info');
+            const dataDisplay = document.createElement('div');
+            dataDisplay.style.cssText = 'background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 12px; margin: 8px 0; font-family: monospace; font-size: 12px; white-space: pre-wrap; color: #93c5fd;';
+            dataDisplay.textContent = JSON.stringify(result.collectedData, null, 2);
+            chatArea.appendChild(dataDisplay);
+          }
+          
+          simulationSessionId = null;
+        }
+        
+        // Re-enable input
+        input.disabled = false;
+        document.getElementById('testSendBtn').disabled = false;
+        input.focus();
+        
+      } catch (e) {
+        removeTypingIndicator(typingId);
+        addSystemMessage('Error: ' + e.message, 'error');
+        input.disabled = false;
+        document.getElementById('testSendBtn').disabled = false;
+        input.focus();
+      }
+    }
+    
+    async function resetTestSimulation() {
+      if (simulationSessionId) {
+        try {
+          await fetch(API + '/flows/' + currentFlow.id + '/simulate/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ sessionId: simulationSessionId })
+          });
+        } catch (e) {
+          console.error('Failed to reset simulation:', e);
+        }
+      }
+      resetTestUI();
+    }
+    
+    function addChatMessage(type, text) {
+      const chatArea = document.getElementById('testChatArea');
+      const msgDiv = document.createElement('div');
+      msgDiv.style.cssText = `
+        display: flex;
+        justify-content: ${type === 'user' ? 'flex-end' : 'flex-start'};
+        margin-bottom: 12px;
+      `;
+      
+      const bubble = document.createElement('div');
+      bubble.style.cssText = `
+        max-width: 85%;
+        padding: 10px 14px;
+        border-radius: 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        ${type === 'user' 
+          ? 'background: var(--primary); color: #000;' 
+          : 'background: var(--card); border: 1px solid var(--border); color: var(--text);'}
+      `;
+      bubble.textContent = text;
+      
+      msgDiv.appendChild(bubble);
+      chatArea.appendChild(msgDiv);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+    
+    function addSystemMessage(text, type = 'info') {
+      const chatArea = document.getElementById('testChatArea');
+      const msgDiv = document.createElement('div');
+      
+      let bgColor = 'transparent';
+      let icon = 'info-circle';
+      let color = 'var(--text-muted)';
+      
+      if (type === 'success') {
+        bgColor = 'rgba(16, 185, 129, 0.1)';
+        icon = 'check-circle';
+        color = '#10b981';
+      } else if (type === 'step') {
+        bgColor = 'rgba(59, 130, 246, 0.1)';
+        icon = 'play-circle';
+        color = '#3b82f6';
+      } else if (type === 'warning') {
+        bgColor = 'rgba(245, 158, 11, 0.1)';
+        icon = 'exclamation-triangle';
+        color = '#f59e0b';
+      } else if (type === 'error') {
+        bgColor = 'rgba(239, 68, 68, 0.1)';
+        icon = 'times-circle';
+        color = '#ef4444';
+      }
+      
+      msgDiv.style.cssText = `
+        text-align: center;
+        font-size: 11px;
+        color: ${color};
+        margin: 8px 0;
+        padding: 6px 12px;
+        background: ${bgColor};
+        border-radius: 6px;
+      `;
+      msgDiv.innerHTML = `<i class="fas fa-${icon}" style="margin-right: 4px;"></i>${text}`;
+      chatArea.appendChild(msgDiv);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+    
+    function addNodeExecutionStep(nodeName, nodeType) {
+      const chatArea = document.getElementById('testChatArea');
+      const msgDiv = document.createElement('div');
+      
+      const nodeTypeColors = {
+        'start': '#10b981',
+        'message': '#3b82f6',
+        'buttons': '#8b5cf6',
+        'input': '#f59e0b',
+        'ai_question': '#ec4899',
+        'condition': '#a855f7',
+        'api': '#06b6d4',
+        'delay': '#6b7280',
+        'end': '#ef4444'
+      };
+      
+      const color = nodeTypeColors[nodeType] || '#6b7280';
+      
+      msgDiv.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: ${color};
+        margin: 6px 0;
+        padding: 6px 12px;
+        background: ${color}15;
+        border-left: 3px solid ${color};
+        border-radius: 0 6px 6px 0;
+      `;
+      msgDiv.innerHTML = `<i class="fas fa-chevron-right"></i> Executing: <strong>${nodeName || nodeType}</strong>`;
+      chatArea.appendChild(msgDiv);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+    
+    function addTypingIndicator() {
+      const chatArea = document.getElementById('testChatArea');
+      const id = 'typing_' + Date.now();
+      const msgDiv = document.createElement('div');
+      msgDiv.id = id;
+      msgDiv.style.cssText = 'display: flex; justify-content: flex-start; margin-bottom: 12px;';
+      msgDiv.innerHTML = `
+        <div style="background: var(--card); border: 1px solid var(--border); padding: 10px 16px; border-radius: 12px;">
+          <i class="fas fa-circle" style="font-size: 6px; color: var(--text-muted); animation: blink 1s infinite;"></i>
+          <i class="fas fa-circle" style="font-size: 6px; color: var(--text-muted); animation: blink 1s infinite 0.2s;"></i>
+          <i class="fas fa-circle" style="font-size: 6px; color: var(--text-muted); animation: blink 1s infinite 0.4s;"></i>
+        </div>
+      `;
+      chatArea.appendChild(msgDiv);
+      chatArea.scrollTop = chatArea.scrollHeight;
+      return id;
+    }
+    
+    function removeTypingIndicator(id) {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    }
+    
+    function updateCollectedData(data) {
+      const panel = document.getElementById('testDataPanel');
+      const dataDiv = document.getElementById('testCollectedData');
+      
+      if (!data || Object.keys(data).length === 0) {
+        panel.style.display = 'none';
+        return;
+      }
+      
+      panel.style.display = 'block';
+      dataDiv.innerHTML = Object.entries(data)
+        .map(([key, value]) => `<div><strong>${key}:</strong> ${value}</div>`)
+        .join('');
+    }
+    
+    // Initialize
+    init();
+  </script>
+  <style>
+    @keyframes blink {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+  </style>
+</body>
+</html>

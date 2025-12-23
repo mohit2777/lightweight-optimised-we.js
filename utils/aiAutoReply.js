@@ -58,6 +58,9 @@ class AiAutoReplyService {
         case 'openrouter-free':
           replyText = await this.callOpenRouter({ config, history, message });
           break;
+        case 'groq':
+          replyText = await this.callGroq({ config, history, message });
+          break;
         default:
           logger.warn(`Unsupported AI provider: ${config.provider}`);
           return null;
@@ -204,6 +207,28 @@ class AiAutoReplyService {
     return response.data.choices?.[0]?.message?.content?.trim() || null;
   }
 
+  async callGroq({ config, history, message }) {
+    const messages = this.buildMessages({ config, history, message });
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: config.model || 'llama-3.3-70b-versatile',
+        messages,
+        temperature: config.temperature ?? 0.7,
+        max_tokens: 1024
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${config.api_key}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    return response.data.choices?.[0]?.message?.content?.trim() || null;
+  }
+
   // Test endpoint helper used by dashboard
   async testConfig({ accountId, provider, model, api_key, system_prompt, temperature, message }) {
     const tempConfig = {
@@ -228,6 +253,8 @@ class AiAutoReplyService {
       case 'openrouter':
       case 'openrouter-free':
         return this.callOpenRouter({ config: tempConfig, history, message });
+      case 'groq':
+        return this.callGroq({ config: tempConfig, history, message });
       default:
         throw new Error(`Unsupported provider: ${provider}`);
     }

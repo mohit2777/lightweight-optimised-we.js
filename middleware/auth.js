@@ -10,9 +10,9 @@ const requireAuth = (req, res, next) => {
     return next();
   }
   
-  // For API routes, return JSON error
-  if (req.path.startsWith('/api/')) {
-    logger.warn(`Unauthorized API access attempt: ${req.method} ${req.path} from ${req.ip}`);
+  // For API routes, return JSON error (use originalUrl to get full path including mount point)
+  if (req.originalUrl.startsWith('/api/')) {
+    logger.warn(`Unauthorized API access attempt: ${req.method} ${req.originalUrl} from ${req.ip}`);
     return res.status(401).json({ 
       error: 'Authentication required',
       message: 'Please login to access this resource'
@@ -44,7 +44,7 @@ const checkSessionTimeout = (req, res, next) => {
         }
       });
       
-      if (req.path.startsWith('/api/')) {
+      if (req.originalUrl.startsWith('/api/')) {
         return res.status(401).json({ 
           error: 'Session expired',
           message: 'Your session has expired. Please login again.'

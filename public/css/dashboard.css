@@ -183,6 +183,33 @@ body {
     opacity: 1;
 }
 
+/* Flow Builder nav link special styling */
+.nav-link.flow-builder-link {
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.08), rgba(168, 85, 247, 0.08));
+    border: 1px solid rgba(236, 72, 153, 0.2);
+}
+
+.nav-link.flow-builder-link:hover {
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(168, 85, 247, 0.15));
+    border-color: rgba(236, 72, 153, 0.4);
+    color: #ec4899;
+}
+
+.nav-link.flow-builder-link .nav-icon {
+    color: #ec4899;
+}
+
+.nav-badge {
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, #ec4899, #a855f7);
+    color: white;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
 .sidebar-footer {
     padding: 25px;
     border-top: 1px solid var(--border-color);
@@ -645,6 +672,42 @@ canvas {
     background: rgba(244, 67, 54, 0.1);
     color: var(--error);
     border: 1px solid rgba(244, 67, 54, 0.2);
+}
+
+/* Feature Badges - Webhook/Chatbot/Flow indicators */
+.feature-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    transition: all 0.2s ease;
+}
+
+.feature-badge.active {
+    background: rgba(76, 175, 80, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.feature-badge.inactive {
+    background: rgba(158, 158, 158, 0.1);
+    color: var(--text-secondary);
+    border: 1px solid rgba(158, 158, 158, 0.2);
+    opacity: 0.7;
+}
+
+.feature-badge i {
+    font-size: 9px;
+}
+
+.feature-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 /* Action Buttons */
