@@ -1207,6 +1207,21 @@ async function initializeApp() {
 // HEALTH CHECK & MONITORING ENDPOINTS
 // ============================================================================
 
+// Ultra-lightweight ping endpoint for UptimeRobot/Cron-job.org (keeps Render awake)
+// Configure UptimeRobot to ping this every 5 minutes for 100% uptime
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong');
+});
+
+// Webhook-style endpoint for UptimeRobot (alternative to /ping)
+app.post('/webhook/keepalive', (req, res) => {
+  res.status(200).json({ 
+    status: 'alive', 
+    timestamp: Date.now(),
+    uptime: Math.floor(process.uptime())
+  });
+});
+
 // Health check for monitoring services (no auth required)
 app.get('/health', async (req, res) => {
   try {
