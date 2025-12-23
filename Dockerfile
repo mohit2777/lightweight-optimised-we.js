@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:18-slim
 
 # Install dependencies for Puppeteer/Chromium
 RUN apt-get update \
@@ -23,8 +23,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies - skip puppeteer postinstall
-RUN npm install --production --ignore-scripts
+# Install dependencies
+RUN npm install --production
 
 # Copy app source
 COPY . .

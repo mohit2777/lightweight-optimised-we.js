@@ -47,12 +47,6 @@
     "nodemon": "^3.0.2"
   },
   "engines": {
-    "node": ">=20.0.0"
-  },
-  "overrides": {
-    "glob": "^10.3.10",
-    "rimraf": "^5.0.5",
-    "inflight": "npm:@pnpm/npm-lifecycle@0.0.0",
-    "puppeteer-core": "21.5.2"
+    "node": ">=18.0.0"
   }
 }

@@ -1,5 +1,5 @@
 # WhatsApp Multi-Automation V2 - Render Optimized Dockerfile
-FROM node:20-slim
+FROM node:18-slim
 
 # Install Chromium and dependencies (Render compatible)
 RUN apt-get update \
@@ -35,8 +35,8 @@ WORKDIR /app
 # Copy package files first (for better caching)
 COPY --chown=pptruser:pptruser package*.json ./
 
-# Install dependencies - skip puppeteer postinstall script
-RUN npm ci --only=production --ignore-scripts \
+# Install dependencies
+RUN npm ci --only=production \
     && npm cache clean --force
 
 # Copy app source
