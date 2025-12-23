@@ -54,6 +54,41 @@ class WhatsAppManager {
     this.flowEngine = new FlowEngine(this);
   }
 
+  // Safely dispose of a WhatsApp client with timeout
+  async safeDisposeClient(accountId, timeoutMs = 15000) {
+    const client = this.clients.get(accountId);
+    if (!client) return true;
+
+    try {
+      // Stop any save intervals
+      if (client.saveInterval) {
+        clearInterval(client.saveInterval);
+        client.saveInterval = null;
+      }
+
+      // Remove all event listeners first to prevent callbacks during destruction
+      client.removeAllListeners();
+
+      // Try to destroy with timeout
+      await Promise.race([
+        client.destroy().catch(e => logger.warn(`Client destroy error for ${accountId}: ${e.message}`)),
+        new Promise(resolve => setTimeout(resolve, timeoutMs))
+      ]);
+
+      logger.info(`Client disposed for ${accountId}`);
+    } catch (error) {
+      logger.warn(`Error during client disposal for ${accountId}:`, error.message);
+    } finally {
+      // Always clean up references
+      this.clients.delete(accountId);
+      this.qrCodes.delete(accountId);
+    }
+
+    // Wait for Chrome processes to fully terminate
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    return true;
+  }
+
   // Check memory usage and cleanup if needed (for Render/Railway)
   checkMemoryUsage() {
     const used = process.memoryUsage();
@@ -120,6 +155,7 @@ class WhatsAppManager {
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
+            '--single-process', // Critical for containerized environments
             '--disable-gpu',
             '--disable-extensions',
             '--disable-default-apps',
@@ -137,7 +173,7 @@ class WhatsAppManager {
             '--disable-component-update',
             '--disable-domain-reliability',
             '--disable-client-side-phishing-detection',
-            '--disable-features=AudioServiceOutOfProcess',
+            '--disable-features=AudioServiceOutOfProcess,TranslateUI',
             '--disable-ipc-flooding-protection',
             '--disable-notifications',
             '--disable-offer-store-unmasked-wallet-cards',
@@ -146,9 +182,11 @@ class WhatsAppManager {
             '--disable-prompt-on-repost',
             '--disable-speech-api',
             '--disable-web-security',
-            '--ignore-certificate-errors'
+            '--ignore-certificate-errors',
+            '--js-flags=--max-old-space-size=256'
           ],
-          defaultViewport: { width: 800, height: 600 }
+          defaultViewport: { width: 800, height: 600 },
+          timeout: 60000 // 60 second timeout for browser launch
         },
         queueOptions: {
           messageProcessingTimeoutMs: 15000,
@@ -1147,15 +1185,15 @@ class WhatsAppManager {
       }
 
       logger.info(`Disposing existing client for ${account.id} before reconnect (${reason})`);
-      try {
-        if (existingClient.saveInterval) clearInterval(existingClient.saveInterval);
-        existingClient.removeAllListeners();
-        await existingClient.destroy();
-      } catch (destroyError) {
-        logger.warn(`Error destroying existing client for ${account.id}:`, destroyError);
+      
+      // Use safe dispose with proper cleanup and wait
+      await this.safeDisposeClient(account.id);
+      
+      // Additional wait if client was initializing (race condition prevention)
+      if (currentStatus === 'initializing') {
+        logger.info(`Waiting extra time for ${account.id} as it was still initializing...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
-
-      this.clients.delete(account.id);
     }
 
     let hasSession = false;
@@ -1240,6 +1278,7 @@ class WhatsAppManager {
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
+            '--single-process', // Critical for containerized environments
             '--disable-gpu',
             '--disable-extensions',
             '--disable-default-apps',
@@ -1257,7 +1296,7 @@ class WhatsAppManager {
             '--disable-component-update',
             '--disable-domain-reliability',
             '--disable-client-side-phishing-detection',
-            '--disable-features=AudioServiceOutOfProcess',
+            '--disable-features=AudioServiceOutOfProcess,TranslateUI',
             '--disable-ipc-flooding-protection',
             '--disable-notifications',
             '--disable-offer-store-unmasked-wallet-cards',
@@ -1266,9 +1305,11 @@ class WhatsAppManager {
             '--disable-prompt-on-repost',
             '--disable-speech-api',
             '--disable-web-security',
-            '--ignore-certificate-errors'
+            '--ignore-certificate-errors',
+            '--js-flags=--max-old-space-size=256'
           ],
-          defaultViewport: { width: 800, height: 600 }
+          defaultViewport: { width: 800, height: 600 },
+          timeout: 60000 // 60 second timeout for browser launch
         },
         queueOptions: {
           messageProcessingTimeoutMs: 15000,
