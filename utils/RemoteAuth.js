@@ -244,36 +244,44 @@ class RemoteAuth extends BaseAuthStrategy {
   }
 
   /**
-   * Helper to recursively read files
+   * Helper to recursively read files with size limits
    */
-  async readDirRecursive(dir, baseDir) {
+  async readDirRecursive(dir, baseDir, stats = { totalSize: 0, fileCount: 0 }) {
+    const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10MB max total session size
+    const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB max per file
+    
     const files = await fs.readdir(dir, { withFileTypes: true });
     let results = {};
 
     for (const file of files) {
+      // Stop if we've exceeded max size
+      if (stats.totalSize > MAX_TOTAL_SIZE) {
+        logger.warn(`[RemoteAuth] Session size limit reached (${(stats.totalSize / 1024 / 1024).toFixed(2)}MB), stopping collection`);
+        break;
+      }
+      
       const fullPath = path.join(dir, file.name);
       const relativePath = path.relative(baseDir, fullPath);
 
       if (file.isDirectory()) {
-        // Optimization: Skip only non-essential cache directories
-        // Keep: Local Storage, IndexedDB, Cookies, Session Storage, Service Worker
-        // Skip: Cache (HTTP cache), GPUCache, Code Cache, DawnCache (graphics shaders)
-        const skipDirs = ['Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'DawnCache'];
+        // Skip non-essential cache directories - be more aggressive to save memory
+        const skipDirs = [
+          'Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'DawnCache',
+          'blob_storage', 'VideoDecodeStats', 'shared_proto_db', 'WebStorage',
+          'Crashpad', 'BrowserMetrics'
+        ];
         if (skipDirs.includes(file.name)) {
           continue;
         }
         
-        const subResults = await this.readDirRecursive(fullPath, baseDir);
+        const subResults = await this.readDirRecursive(fullPath, baseDir, stats);
         Object.assign(results, subResults);
       } else {
-        // Skip only lock files and temporary files
-        // IMPORTANT: Keep CURRENT, MANIFEST-*, and .ldb files - these are essential for LevelDB
-        const skipFiles = ['SingletonLock', 'LOCK', 'lockfile'];
-        const skipExtensions = ['.lock', '.log', '-journal'];
+        // Skip lock files, logs, and temporary files
+        const skipFiles = ['SingletonLock', 'LOCK', 'lockfile', 'LOG', 'LOG.old', 'DevToolsActivePort'];
+        const skipExtensions = ['.lock', '.log', '-journal', '.tmp'];
         
         if (skipFiles.includes(file.name) || 
-            file.name === 'LOG' ||
-            file.name === 'LOG.old' ||
             skipExtensions.some(ext => file.name.endsWith(ext)) ||
             file.name.startsWith('.org.chromium.') ||
             (file.name.startsWith('.') && file.name !== '.'))
@@ -281,23 +289,38 @@ class RemoteAuth extends BaseAuthStrategy {
           continue;
         }
         
-        // Retry logic for locked files
+        // Check file size before reading
+        try {
+          const fileStat = await fs.stat(fullPath);
+          if (fileStat.size > MAX_FILE_SIZE) {
+            logger.debug(`[RemoteAuth] Skipping large file: ${relativePath} (${(fileStat.size / 1024).toFixed(0)}KB)`);
+            continue;
+          }
+          if (fileStat.size === 0) {
+            continue; // Skip empty files
+          }
+        } catch (e) {
+          continue;
+        }
+        
+        // Read file with retry logic
         let content = null;
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < 2; attempt++) {
           try {
             content = await fs.readFile(fullPath);
             break;
           } catch (err) {
-            if (err.code === 'EBUSY' && attempt < 2) {
-              await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
+            if (err.code === 'EBUSY' && attempt < 1) {
+              await new Promise(r => setTimeout(r, 100));
               continue;
             }
-            // Silently skip unreadable files - they're usually lock/temp files
             break;
           }
         }
         
         if (content) {
+          stats.totalSize += content.length;
+          stats.fileCount++;
           results[relativePath] = content.toString('base64');
         }
       }
@@ -310,6 +333,14 @@ class RemoteAuth extends BaseAuthStrategy {
    */
   async saveSessionToDb() {
     try {
+      // Check memory before starting
+      const memUsage = process.memoryUsage();
+      const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+      if (heapUsedMB > 400) {
+        logger.warn(`[RemoteAuth] Memory too high (${heapUsedMB.toFixed(0)}MB), skipping session save`);
+        return;
+      }
+      
       const sessionPath = this.getSessionPath();
       // logger.debug(`[RemoteAuth] Scanning session files in ${sessionPath}`);
       
@@ -321,9 +352,13 @@ class RemoteAuth extends BaseAuthStrategy {
         return;
       }
 
-      const files = await this.readDirRecursive(sessionPath, sessionPath);
+      logger.info(`[RemoteAuth] Collecting session files from ${sessionPath}...`);
+      const stats = { totalSize: 0, fileCount: 0 };
+      const files = await this.readDirRecursive(sessionPath, sessionPath, stats);
       const fileCount = Object.keys(files).length;
       const fileNames = Object.keys(files);
+      
+      logger.info(`[RemoteAuth] Collected ${fileCount} files (${(stats.totalSize / 1024).toFixed(0)}KB raw)`);
       
       if (fileCount === 0) {
         logger.warn('[RemoteAuth] No session files found to save');
@@ -343,15 +378,29 @@ class RemoteAuth extends BaseAuthStrategy {
         return;
       }
 
-      // logger.debug(`[RemoteAuth] Compressing ${fileCount} files...`);
+      logger.info(`[RemoteAuth] Compressing ${fileCount} files...`);
       
       const sessionData = {
         files: files,
         timestamp: Date.now()
       };
 
-      const sessionJson = JSON.stringify(sessionData);
+      // Use try-catch for JSON stringify (can fail with circular refs)
+      let sessionJson;
+      try {
+        sessionJson = JSON.stringify(sessionData);
+      } catch (e) {
+        logger.error(`[RemoteAuth] Failed to stringify session data:`, e.message);
+        return;
+      }
+      
+      logger.info(`[RemoteAuth] JSON size: ${(sessionJson.length / 1024).toFixed(0)}KB, compressing...`);
+      
       const compressed = await gzip(sessionJson);
+      
+      // Free up memory
+      sessionJson = null;
+      
       const compressedBase64 = compressed.toString('base64');
 
       const storagePayload = JSON.stringify({
@@ -361,11 +410,22 @@ class RemoteAuth extends BaseAuthStrategy {
       
       const finalBase64 = Buffer.from(storagePayload).toString('base64');
       
+      // Free up memory before DB call
+      const finalSize = finalBase64.length;
+      
+      logger.info(`[RemoteAuth] Saving to database (${(finalSize / 1024).toFixed(2)}KB compressed)...`);
+      
       await db.saveSessionData(this.accountId, finalBase64);
-      logger.info(`[RemoteAuth] Session saved to database successfully (${(finalBase64.length / 1024).toFixed(2)}KB)`);
+      
+      logger.info(`[RemoteAuth] ✅ Session saved successfully (${(finalSize / 1024).toFixed(2)}KB)`);
+      
+      // Trigger garbage collection if available
+      if (global.gc) {
+        global.gc();
+      }
       
     } catch (error) {
-      logger.error(`[RemoteAuth] Error saving session to DB:`, error);
+      logger.error(`[RemoteAuth] Error saving session to DB:`, error.message);
     }
   }
 

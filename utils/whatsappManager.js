@@ -313,61 +313,67 @@ class WhatsAppManager {
         // Emit ready event to connected clients
         this.emitToAll('ready', { accountId, phoneNumber });
 
-        logger.info(`WhatsApp client ready for account ${accountId} (${phoneNumber})`);
+        logger.info(`✅ WhatsApp client ready for account ${accountId} (${phoneNumber})`);
 
-        // Save session after successful connection with retry
+        // Save session after successful connection
+        // Wait 10 seconds for browser state to stabilize, then save ONCE
         if (client.authStrategy instanceof RemoteAuth) {
-          const saveWithRetry = async (attempt = 1) => {
-            try {
-              await client.authStrategy.saveSessionToDb();
-              logger.info(`Session saved to database for ${accountId} (attempt ${attempt})`);
-              return true;
-            } catch (err) {
-              if (attempt < 3) {
-                logger.warn(`Session save attempt ${attempt} failed for ${accountId}, retrying...`);
-                await new Promise(r => setTimeout(r, 2000 * attempt));
-                return saveWithRetry(attempt + 1);
-              }
-              logger.error(`All session save attempts failed for ${accountId}:`, err.message);
-              return false;
-            }
-          };
-
-          // Initial save with retry
-          await saveWithRetry();
-          
-          // Second save after 5 seconds (browser state more stable)
           setTimeout(async () => {
             try {
-              if (this.accountStatus.get(accountId) === 'ready') {
-                await client.authStrategy.saveSessionToDb();
-                logger.info(`[${accountId}] Secondary session save completed`);
+              // Check if still ready
+              if (this.accountStatus.get(accountId) !== 'ready') {
+                logger.warn(`[${accountId}] Status changed, skipping session save`);
+                return;
               }
+              
+              // Check memory before save
+              const memUsage = process.memoryUsage();
+              const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+              logger.info(`[${accountId}] Memory before session save: ${heapUsedMB.toFixed(0)}MB heap`);
+              
+              if (heapUsedMB > 350) {
+                logger.warn(`[${accountId}] Memory too high, deferring session save`);
+                // Try again in 30 seconds
+                setTimeout(async () => {
+                  try {
+                    if (this.accountStatus.get(accountId) === 'ready') {
+                      await client.authStrategy.saveSessionToDb();
+                      logger.info(`✅ [${accountId}] Deferred session save completed`);
+                    }
+                  } catch (e) {
+                    logger.error(`[${accountId}] Deferred session save failed:`, e.message);
+                  }
+                }, 30000);
+                return;
+              }
+              
+              await client.authStrategy.saveSessionToDb();
+              logger.info(`✅ [${accountId}] Session saved to database`);
+              
             } catch (err) {
-              logger.warn(`Secondary session save failed for ${accountId}:`, err.message);
+              logger.error(`[${accountId}] Session save failed:`, err.message);
             }
-          }, 5000);
+          }, 10000); // Wait 10 seconds after ready
 
-          // Set up periodic save - default 15 minutes (was 5 min)
-          // Can be disabled with DISABLE_PERIODIC_SESSION_SAVE=true to reduce egress
+          // Set up periodic save - default 15 minutes
           if (process.env.DISABLE_PERIODIC_SESSION_SAVE !== 'true') {
-            // Clear existing interval if any
             if (client.saveInterval) clearInterval(client.saveInterval);
 
-            const saveIntervalMs = parseInt(process.env.SESSION_SAVE_INTERVAL_MS) || 15 * 60 * 1000; // 15 min default
+            const saveIntervalMs = parseInt(process.env.SESSION_SAVE_INTERVAL_MS) || 15 * 60 * 1000;
             client.saveInterval = setInterval(async () => {
               try {
                 if (this.accountStatus.get(accountId) === 'ready') {
-                  await client.authStrategy.saveSessionToDb();
+                  const mem = process.memoryUsage();
+                  if (mem.heapUsed / 1024 / 1024 < 350) {
+                    await client.authStrategy.saveSessionToDb();
+                  }
                 }
               } catch (err) {
                 logger.warn(`Periodic session save failed for ${accountId}:`, err.message);
               }
             }, saveIntervalMs);
 
-            logger.info(`Session persistence enabled for account ${accountId} (interval: ${saveIntervalMs / 60000}min)`);
-          } else {
-            logger.info(`Periodic session save disabled for ${accountId} (egress saving mode)`);
+            logger.info(`[${accountId}] Session persistence enabled (interval: ${saveIntervalMs / 60000}min)`);
           }
         }
       } catch (error) {
@@ -385,55 +391,17 @@ class WhatsAppManager {
         // Reset QR attempts counter on successful authentication
         this.qrAttempts.delete(accountId);
 
-        // Save session with multiple attempts after authentication
-        // Wait times are longer to ensure browser has written all session files
-        if (client.authStrategy instanceof RemoteAuth) {
-          const saveAttempts = [5000, 10000, 15000]; // 5s, 10s, 15s - longer waits for reliability
-          
-          for (let i = 0; i < saveAttempts.length; i++) {
-            await new Promise(resolve => setTimeout(resolve, saveAttempts[i]));
-            
-            // Check if client is still valid
-            if (!this.clients.has(accountId)) {
-              logger.warn(`Client no longer exists for ${accountId}, skipping session save`);
-              break;
-            }
-            
-            try {
-              await client.authStrategy.saveSessionToDb();
-              logger.info(`✅ Session saved after authentication for ${accountId} (attempt ${i + 1})`);
-              break; // Success, exit loop
-            } catch (saveErr) {
-              if (i < saveAttempts.length - 1) {
-                logger.warn(`Post-auth session save attempt ${i + 1} failed for ${accountId}, will retry...`);
-              } else {
-                logger.error(`All post-auth session save attempts failed for ${accountId}:`, saveErr.message);
-              }
-            }
-          }
-        }
+        // Don't save session here - wait for 'ready' event
+        // The 'ready' event fires after browser state is fully established
+        logger.info(`[${accountId}] Waiting for 'ready' event before saving session...`);
+        
       } catch (error) {
         logger.error(`Error in authenticated handler for ${accountId}:`, error);
-        // Don't throw - allow connection to continue
       }
     });
 
     client.on('loading_screen', (percent, message) => {
       logger.info(`[${accountId}] Loading... ${percent}% - ${message}`);
-      
-      // Save session when loading completes (100%)
-      if (percent === 100 && client.authStrategy instanceof RemoteAuth) {
-        setTimeout(async () => {
-          try {
-            if (this.clients.has(accountId)) {
-              await client.authStrategy.saveSessionToDb();
-              logger.info(`✅ Session saved after loading complete for ${accountId}`);
-            }
-          } catch (err) {
-            logger.warn(`Loading complete session save failed for ${accountId}:`, err.message);
-          }
-        }, 3000); // Wait 3s after loading completes
-      }
     });
 
     client.on('remote_session_saved', async () => {
