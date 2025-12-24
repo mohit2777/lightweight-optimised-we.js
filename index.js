@@ -83,10 +83,37 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Session configuration with enhanced security
 // Use MemoryStore for simplicity - sessions will reset on server restart
-// To enable persistent sessions, set SUPABASE_DB_PASSWORD
+// To enable persistent sessions, set DATABASE_URL or SUPABASE_DB_PASSWORD
 let sessionStore = new session.MemoryStore();
 
-if (process.env.SUPABASE_DB_PASSWORD) {
+// Check for DATABASE_URL first (Render/Heroku style), then fall back to SUPABASE_DB_PASSWORD
+if (process.env.DATABASE_URL) {
+  try {
+    const pgPool = new pg.Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000,
+      max: 3
+    });
+    
+    pgPool.on('error', (err) => {
+      logger.error('Session DB pool error:', err.message);
+    });
+    
+    sessionStore = new pgSession({
+      pool: pgPool,
+      tableName: 'session',
+      createTableIfMissing: true,
+      pruneSessionInterval: false,
+      errorLog: (err) => logger.error('Session store error:', err.message)
+    });
+    
+    logger.info('Using PostgreSQL for session storage (DATABASE_URL)');
+  } catch (e) {
+    logger.error('PostgreSQL session setup failed, using MemoryStore:', e.message);
+    sessionStore = new session.MemoryStore();
+  }
+} else if (process.env.SUPABASE_DB_PASSWORD) {
   try {
     const supabaseUrl = new URL(process.env.SUPABASE_URL);
     const projectRef = supabaseUrl.hostname.split('.')[0];
@@ -111,17 +138,17 @@ if (process.env.SUPABASE_DB_PASSWORD) {
       pool: pgPool,
       tableName: 'session',
       createTableIfMissing: true,
-      pruneSessionInterval: false, // Disable auto-prune to avoid errors
+      pruneSessionInterval: false,
       errorLog: (err) => logger.error('Session store error:', err.message)
     });
     
-    logger.info('Using PostgreSQL for session storage');
+    logger.info('Using PostgreSQL for session storage (SUPABASE_DB_PASSWORD)');
   } catch (e) {
     logger.error('PostgreSQL session setup failed, using MemoryStore:', e.message);
     sessionStore = new session.MemoryStore();
   }
 } else {
-  logger.info('Using MemoryStore for sessions (set SUPABASE_DB_PASSWORD for persistence)');
+  logger.info('Using MemoryStore for sessions (set DATABASE_URL or SUPABASE_DB_PASSWORD for persistence)');
 }
 
 // Generate a secure session secret if not provided
