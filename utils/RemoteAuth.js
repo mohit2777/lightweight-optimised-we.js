@@ -243,12 +243,14 @@ class RemoteAuth extends BaseAuthStrategy {
   }
 
   /**
-   * Collect all session files - simplified and robust
-   * Focuses on what WhatsApp actually needs: IndexedDB, LocalStorage, Cookies
+   * Collect ONLY essential WhatsApp session files
+   * WhatsApp stores auth in: IndexedDB, Local Storage, Session Storage, and Cookies
+   * Everything else (Chrome components, cache, etc.) is NOT needed
    */
-  async collectSessionFiles(dir, baseDir, stats = { totalSize: 0, files: {} }) {
+  async collectSessionFiles(dir, baseDir, stats = { totalSize: 0, files: {} }, depth = 0) {
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
+      const relativeDirPath = path.relative(baseDir, dir);
       
       for (const entry of entries) {
         if (stats.totalSize > MAX_TOTAL_SIZE) {
@@ -260,7 +262,25 @@ class RemoteAuth extends BaseAuthStrategy {
         const relativePath = path.relative(baseDir, fullPath);
         
         if (entry.isDirectory()) {
-          // Skip these directories (cache, not needed for auth)
+          // At root level (depth 0), ONLY enter "Default" directory
+          if (depth === 0) {
+            if (entry.name === 'Default') {
+              await this.collectSessionFiles(fullPath, baseDir, stats, depth + 1);
+            }
+            // Skip ALL other root directories (Chrome components, etc.)
+            continue;
+          }
+          
+          // Inside Default (depth 1+), only enter essential directories
+          const essentialDirs = [
+            'IndexedDB',
+            'Local Storage',
+            'Session Storage',
+            'leveldb',
+            'https_web.whatsapp.com_0.indexeddb.leveldb'
+          ];
+          
+          // Skip cache and other unnecessary directories
           const skipDirs = [
             'Cache', 
             'Code Cache', 
@@ -279,30 +299,44 @@ class RemoteAuth extends BaseAuthStrategy {
             'BrowserMetrics',
             'extensions',
             'component_crx_cache',
-            'SafeBrowsing'
+            'SafeBrowsing',
+            'databases',
+            'Feature Engagement Tracker',
+            'GCM Store',
+            'Platform Notifications',
+            'Storage',
+            'Sync Data',
+            'TransportSecurity',
+            'Trust Tokens',
+            'AutofillStrikeDatabase'
           ];
           
-          // Skip if in skipDirs
           if (skipDirs.includes(entry.name)) {
             continue;
           }
           
-          // Recurse into ALL other directories (including Default, IndexedDB, Local Storage, etc.)
-          await this.collectSessionFiles(fullPath, baseDir, stats);
+          // Only recurse into essential directories or their children
+          if (essentialDirs.includes(entry.name) || 
+              relativeDirPath.includes('IndexedDB') || 
+              relativeDirPath.includes('Local Storage') ||
+              relativeDirPath.includes('Session Storage')) {
+            await this.collectSessionFiles(fullPath, baseDir, stats, depth + 1);
+          }
         } else {
-          // Skip these files (temporary/lock files)
-          const skipFiles = [
-            'SingletonLock',
-            'SingletonCookie', 
-            'SingletonSocket',
-            'DevToolsActivePort'
-          ];
+          // Only collect files inside essential paths
+          const isEssentialPath = 
+            relativePath.includes('IndexedDB') || 
+            relativePath.includes('Local Storage') ||
+            relativePath.includes('Session Storage') ||
+            relativePath.includes('Cookies');
           
-          // Skip these extensions
-          const skipExtensions = [
-            '-journal',
-            '.tmp'
-          ];
+          if (!isEssentialPath) {
+            continue;
+          }
+          
+          // Skip lock and temp files
+          const skipFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort', 'LOCK'];
+          const skipExtensions = ['-journal', '.tmp'];
           
           if (skipFiles.includes(entry.name)) continue;
           if (skipExtensions.some(ext => entry.name.endsWith(ext))) continue;
@@ -336,6 +370,29 @@ class RemoteAuth extends BaseAuthStrategy {
   }
 
   /**
+   * Collect essential files directly in Default/ folder (Cookies, etc.)
+   */
+  async collectDefaultFiles(sessionPath, stats) {
+    const defaultPath = path.join(sessionPath, 'Default');
+    const essentialFiles = ['Cookies']; // Only Cookies is essential for auth
+    
+    for (const fileName of essentialFiles) {
+      try {
+        const filePath = path.join(defaultPath, fileName);
+        const fileStat = await fs.stat(filePath);
+        if (fileStat.size > 0 && fileStat.size < MAX_FILE_SIZE) {
+          const content = await fs.readFile(filePath);
+          const relativePath = path.join('Default', fileName);
+          stats.files[relativePath] = content.toString('base64');
+          stats.totalSize += content.length;
+        }
+      } catch (err) {
+        // File doesn't exist or can't be read
+      }
+    }
+  }
+
+  /**
    * Save session to database
    */
   async saveSession() {
@@ -352,12 +409,16 @@ class RemoteAuth extends BaseAuthStrategy {
 
       logger.info(`[Session] Collecting session files from ${sessionPath}...`);
       const stats = await this.collectSessionFiles(sessionPath, sessionPath);
+      
+      // Also collect essential files from Default/ directly (Cookies)
+      await this.collectDefaultFiles(sessionPath, stats);
+      
       const fileCount = Object.keys(stats.files).length;
       const fileNames = Object.keys(stats.files);
       
       // Log what we collected for debugging
       logger.info(`[Session] Collected ${fileCount} files (${(stats.totalSize/1024).toFixed(0)}KB)`);
-      logger.info(`[Session] Files: ${fileNames.slice(0, 15).join(', ')}${fileNames.length > 15 ? '...' : ''}`);
+      logger.info(`[Session] Files: ${fileNames.join(', ')}`);
       
       if (fileCount === 0) {
         logger.warn('[Session] No files collected');
