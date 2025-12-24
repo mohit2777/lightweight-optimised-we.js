@@ -192,6 +192,9 @@ app.use((req, res, next) => {
 // SOCKET.IO
 // ============================================================================
 
+// Set Socket.IO instance on whatsappManager for real-time updates
+whatsappManager.setSocketIO(io);
+
 io.on('connection', (socket) => {
   logger.info(`Client connected: ${socket.id}`);
 
@@ -436,7 +439,7 @@ app.delete('/api/accounts/:id', requireAuth, apiLimiter, async (req, res) => {
   }
 });
 
-// Get QR code
+// Get QR code (passive - just returns current QR if available)
 app.get('/api/accounts/:id/qr', requireAuth, apiLimiter, async (req, res) => {
   const accountId = req.params.id;
 
@@ -453,24 +456,44 @@ app.get('/api/accounts/:id/qr', requireAuth, apiLimiter, async (req, res) => {
       return res.json({ status: 'ready' });
     }
 
-    // If we are not reconnecting and not ready, we should probably try to get a QR code
-    if (!whatsappManager.isReconnecting(accountId)) {
-      try {
-        // Force a new QR code generation
-        const result = await whatsappManager.requestNewQRCode(accountId);
-        return res.status(202).json({ status: result?.status || 'initializing' });
-      } catch (error) {
-        if (error.message === 'Account not found') {
-          return res.status(404).json({ error: 'Account not found' });
-        }
-        throw error;
-      }
-    }
-
-    return res.status(202).json({ status: runtimeStatus || 'initializing' });
+    // Return current status without forcing a new QR
+    // Use POST /api/accounts/:id/request-qr to explicitly request a new QR
+    return res.status(202).json({ 
+      status: runtimeStatus || 'disconnected',
+      message: runtimeStatus === 'initializing' 
+        ? 'QR code is being generated, please wait...' 
+        : 'Use "Request New QR" button to generate a QR code'
+    });
   } catch (error) {
     logger.error(`Error fetching QR code for ${accountId}:`, error);
     res.status(500).json({ error: 'Failed to fetch QR code' });
+  }
+});
+
+// Request new QR code (active - forces new QR generation)
+app.post('/api/accounts/:id/request-qr', requireAuth, apiLimiter, async (req, res) => {
+  const accountId = req.params.id;
+
+  try {
+    // Check if already initializing or reconnecting
+    if (whatsappManager.isReconnecting(accountId)) {
+      return res.status(202).json({ status: 'reconnecting', message: 'Already generating QR code, please wait...' });
+    }
+
+    const runtimeStatus = whatsappManager.getAccountStatus(accountId);
+    if (runtimeStatus === 'ready') {
+      return res.json({ status: 'ready', message: 'Account is already connected' });
+    }
+
+    // Force a new QR code generation
+    const result = await whatsappManager.requestNewQRCode(accountId);
+    return res.status(202).json({ status: result?.status || 'initializing', message: 'QR code generation started' });
+  } catch (error) {
+    if (error.message === 'Account not found') {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    logger.error(`Error requesting new QR for ${accountId}:`, error);
+    res.status(500).json({ error: 'Failed to request new QR code' });
   }
 });
 

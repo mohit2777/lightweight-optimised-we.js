@@ -52,6 +52,7 @@ class WhatsAppManager {
     this.eventHandlers = new Map(); // Store event handlers for cleanup
     this.isShuttingDown = false; // Track shutdown state
     this.qrAttempts = new Map(); // Track QR generation attempts per account
+    this.io = null; // Socket.IO instance (set after server starts)
 
     // Performance metrics
     this.metrics = {
@@ -78,6 +79,26 @@ class WhatsAppManager {
 
     // Initialize Flow Engine
     this.flowEngine = new FlowEngine(this);
+  }
+
+  // Set Socket.IO instance for real-time updates
+  setSocketIO(io) {
+    this.io = io;
+    logger.info('Socket.IO instance set for WhatsAppManager');
+  }
+
+  // Emit event to all connected clients
+  emitToAll(event, data) {
+    if (this.io) {
+      this.io.emit(event, data);
+    }
+  }
+
+  // Emit event to specific account subscribers
+  emitToAccount(accountId, event, data) {
+    if (this.io) {
+      this.io.to(`account-${accountId}`).emit(event, data);
+    }
   }
 
   // Safely dispose of a WhatsApp client with timeout
@@ -265,6 +286,10 @@ class WhatsAppManager {
         });
 
         this.accountStatus.set(accountId, 'qr_ready');
+        
+        // Emit QR code to connected clients via Socket.IO
+        this.emitToAll('qr', { accountId, qr: qrDataUrl });
+        
         logger.info(`QR code generated for account ${accountId} (attempt ${attempts}/${maxQrAttempts})`);
       } catch (error) {
         logger.error(`Error generating QR code for ${accountId}:`, error);
@@ -273,17 +298,22 @@ class WhatsAppManager {
 
     client.on('ready', async () => {
       try {
+        const phoneNumber = client.info.wid.user;
+        
         await db.updateAccount(accountId, {
           status: 'ready',
-          phone_number: client.info.wid.user,
+          phone_number: phoneNumber,
           last_active_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
 
         this.accountStatus.set(accountId, 'ready');
         this.qrCodes.delete(accountId);
+        
+        // Emit ready event to connected clients
+        this.emitToAll('ready', { accountId, phoneNumber });
 
-        logger.info(`WhatsApp client ready for account ${accountId} (${client.info.wid.user})`);
+        logger.info(`WhatsApp client ready for account ${accountId} (${phoneNumber})`);
 
         // Save session after successful connection with retry
         if (client.authStrategy instanceof RemoteAuth) {
@@ -349,6 +379,9 @@ class WhatsAppManager {
       try {
         logger.info(`WhatsApp client authenticated for account ${accountId}`);
         
+        // Emit authenticated event to connected clients
+        this.emitToAll('authenticated', { accountId });
+        
         // Reset QR attempts counter on successful authentication
         this.qrAttempts.delete(accountId);
 
@@ -410,6 +443,10 @@ class WhatsAppManager {
         });
 
         this.accountStatus.set(accountId, 'disconnected');
+        
+        // Emit disconnected event to connected clients
+        this.emitToAll('disconnected', { accountId, reason });
+        
         logger.warn(`WhatsApp client disconnected for account ${accountId}:`, reason);
 
         // Clear session data on disconnect (will require QR scan to reconnect)

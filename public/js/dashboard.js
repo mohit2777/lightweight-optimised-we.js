@@ -877,7 +877,7 @@ function displayQRCode(accountId, qrData) {
     }
 }
 
-// Show QR Code for existing account
+// Show QR Code for existing account (passive - just shows current QR)
 async function showQRCode(accountId) {
     const btn = document.querySelector(`button[data-action="show-qr"][data-account-id="${accountId}"]`);
     const originalContent = btn ? btn.innerHTML : '';
@@ -909,6 +909,9 @@ async function showQRCode(accountId) {
                     <img src="${data.qr_code}" alt="QR Code" style="width: 100%; height: 100%;">
                     <div class="scanning-effect"></div>
                 </div>
+                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">
+                    Scan this QR code with WhatsApp
+                </p>
             `;
         } else if (data.status === 'ready') {
             document.getElementById('qrCode').innerHTML = `
@@ -917,11 +920,22 @@ async function showQRCode(accountId) {
                     <p style="margin-top: 20px; color: var(--success);">Account is already connected!</p>
                 </div>
             `;
-        } else {
+        } else if (data.status === 'initializing') {
             document.getElementById('qrCode').innerHTML = `
                 <div style="text-align: center; padding: 40px;">
                     <i class="fas fa-spinner fa-spin" style="font-size: 48px;"></i>
-                    <p style="margin-top: 20px;">Generating QR code...</p>
+                    <p style="margin-top: 20px;">${data.message || 'QR code is being generated...'}</p>
+                </div>
+            `;
+        } else {
+            // Account is disconnected - show option to request new QR
+            document.getElementById('qrCode').innerHTML = `
+                <div style="text-align: center; padding: 40px;">
+                    <i class="fas fa-qrcode" style="font-size: 48px; color: var(--text-secondary);"></i>
+                    <p style="margin-top: 20px; color: var(--text-secondary);">No QR code available</p>
+                    <button class="btn btn-primary" style="margin-top: 15px;" onclick="requestNewQR('${accountId}')">
+                        <i class="fas fa-sync-alt"></i> Request New QR Code
+                    </button>
                 </div>
             `;
         }
@@ -934,6 +948,59 @@ async function showQRCode(accountId) {
             btn.disabled = false;
             btn.innerHTML = originalContent;
         }
+    }
+}
+
+// Request a new QR code (active - forces generation)
+async function requestNewQR(accountId) {
+    const qrCodeDiv = document.getElementById('qrCode');
+    
+    // Show loading state
+    qrCodeDiv.innerHTML = `
+        <div style="text-align: center; padding: 40px;">
+            <i class="fas fa-spinner fa-spin" style="font-size: 48px;"></i>
+            <p style="margin-top: 20px;">Requesting new QR code...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch(`/api/accounts/${accountId}/request-qr`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+        
+        if (data.status === 'ready') {
+            qrCodeDiv.innerHTML = `
+                <div style="text-align: center; padding: 40px;">
+                    <i class="fas fa-check-circle" style="font-size: 48px; color: var(--success);"></i>
+                    <p style="margin-top: 20px; color: var(--success);">Account is already connected!</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Show generating message - QR will come via Socket.IO
+        qrCodeDiv.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <i class="fas fa-spinner fa-spin" style="font-size: 48px;"></i>
+                <p style="margin-top: 20px;">${data.message || 'Generating QR code...'}</p>
+                <p style="margin-top: 10px; font-size: 0.9em; color: var(--text-secondary);">QR code will appear automatically when ready</p>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error('Error requesting new QR:', error);
+        qrCodeDiv.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: var(--danger);"></i>
+                <p style="margin-top: 20px; color: var(--danger);">Failed to request QR code</p>
+                <button class="btn btn-primary" style="margin-top: 15px;" onclick="requestNewQR('${accountId}')">
+                    <i class="fas fa-redo"></i> Try Again
+                </button>
+            </div>
+        `;
     }
 }
 
