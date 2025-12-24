@@ -1,10 +1,14 @@
 # WhatsApp Multi-Automation V2 - Render Optimized Dockerfile
 FROM node:18-slim
 
-# Install Chromium and dependencies (Render compatible)
+# Install Google Chrome (more reliable than chromium package)
 RUN apt-get update \
+    && apt-get install -y wget gnupg \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
     && apt-get install -y \
-        chromium \
+        google-chrome-stable \
         fonts-ipafont-gothic \
         fonts-wqy-zenhei \
         fonts-thai-tlwg \
@@ -16,7 +20,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/cache/apt/*
 
-# Set Puppeteer to use system Chromium and skip download
+# Set Puppeteer to use system Chrome and skip download
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
