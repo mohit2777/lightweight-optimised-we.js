@@ -1267,6 +1267,47 @@ app.get('/api/debug/puppeteer', async (req, res) => {
   res.json(diagnostics);
 });
 
+// Test Puppeteer launch endpoint
+app.get('/api/debug/test-puppeteer', async (req, res) => {
+  const puppeteer = require('puppeteer-core');
+  const result = {
+    success: false,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome',
+    error: null,
+    browserVersion: null
+  };
+  
+  let browser = null;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      executablePath: result.executablePath,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process'
+      ],
+      timeout: 30000
+    });
+    
+    result.browserVersion = await browser.version();
+    result.success = true;
+  } catch (e) {
+    result.error = e.message;
+    result.stack = e.stack?.split('\n').slice(0, 5);
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (e) { /* ignore */ }
+    }
+  }
+  
+  res.json(result);
+});
+
 // Webhook-style endpoint for UptimeRobot (alternative to /ping)
 app.post('/webhook/keepalive', (req, res) => {
   res.status(200).json({ 
