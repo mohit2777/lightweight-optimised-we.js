@@ -1219,6 +1219,54 @@ app.get('/ping', (req, res) => {
   res.status(200).send('pong');
 });
 
+// Diagnostic endpoint to check Puppeteer/Chromium setup
+app.get('/api/debug/puppeteer', async (req, res) => {
+  const fs = require('fs');
+  const { execSync } = require('child_process');
+  
+  const diagnostics = {
+    puppeteerPath: process.env.PUPPETEER_EXECUTABLE_PATH || 'NOT SET',
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    memory: {
+      total: Math.round(require('os').totalmem() / 1024 / 1024) + 'MB',
+      free: Math.round(require('os').freemem() / 1024 / 1024) + 'MB',
+      used: Math.round(process.memoryUsage().rss / 1024 / 1024) + 'MB'
+    },
+    chromiumExists: false,
+    chromiumVersion: null,
+    envVars: {
+      PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH || 'NOT SET',
+      PUPPETEER_SKIP_DOWNLOAD: process.env.PUPPETEER_SKIP_DOWNLOAD || 'NOT SET',
+      NODE_ENV: process.env.NODE_ENV || 'NOT SET'
+    }
+  };
+  
+  // Check if chromium exists
+  const chromiumPath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+  try {
+    if (fs.existsSync(chromiumPath)) {
+      diagnostics.chromiumExists = true;
+      try {
+        diagnostics.chromiumVersion = execSync(`${chromiumPath} --version 2>/dev/null`).toString().trim();
+      } catch (e) {
+        diagnostics.chromiumVersion = 'Could not get version: ' + e.message;
+      }
+    }
+  } catch (e) {
+    diagnostics.chromiumError = e.message;
+  }
+  
+  // Check alternative paths
+  const altPaths = ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'];
+  diagnostics.availableChromium = altPaths.filter(p => {
+    try { return fs.existsSync(p); } catch { return false; }
+  });
+  
+  res.json(diagnostics);
+});
+
 // Webhook-style endpoint for UptimeRobot (alternative to /ping)
 app.post('/webhook/keepalive', (req, res) => {
   res.status(200).json({ 
