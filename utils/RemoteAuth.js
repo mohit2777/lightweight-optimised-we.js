@@ -97,7 +97,9 @@ async function preRestoreSession(accountId, dataPath = './wa-sessions-temp') {
     }
 
     const fileCount = Object.keys(files).length;
+    const fileNames = Object.keys(files);
     logger.info(`[Session] Restoring ${fileCount} files to disk...`);
+    logger.info(`[Session] Files to restore: ${fileNames.slice(0, 10).join(', ')}${fileNames.length > 10 ? '...' : ''}`);
 
     // Restore all files
     let restoredCount = 0;
@@ -113,6 +115,11 @@ async function preRestoreSession(accountId, dataPath = './wa-sessions-temp') {
         logger.warn(`[Session] Failed to restore file: ${relativePath}`);
       }
     }
+    
+    // Verify essential files were restored
+    const hasIndexedDB = fileNames.some(f => f.includes('IndexedDB'));
+    const hasLocalStorage = fileNames.some(f => f.includes('Local Storage'));
+    logger.info(`[Session] Has IndexedDB: ${hasIndexedDB}, LocalStorage: ${hasLocalStorage}`);
     
     logger.info(`[Session] ✅ Restored ${restoredCount}/${fileCount} files for ${accountId}`);
     return { restored: true, sessionPath };
@@ -253,16 +260,6 @@ class RemoteAuth extends BaseAuthStrategy {
         const relativePath = path.relative(baseDir, fullPath);
         
         if (entry.isDirectory()) {
-          // Include these directories
-          const includeDirs = [
-            'Default',
-            'IndexedDB',
-            'Local Storage',
-            'Session Storage',
-            'leveldb',
-            'https_web.whatsapp.com_0.indexeddb.leveldb'
-          ];
-          
           // Skip these directories (cache, not needed for auth)
           const skipDirs = [
             'Cache', 
@@ -278,17 +275,20 @@ class RemoteAuth extends BaseAuthStrategy {
             'Crashpad',
             'Service Worker',
             'Network',
-            'optimization_guide_model_store'
+            'optimization_guide_model_store',
+            'BrowserMetrics',
+            'extensions',
+            'component_crx_cache',
+            'SafeBrowsing'
           ];
           
+          // Skip if in skipDirs
           if (skipDirs.includes(entry.name)) {
             continue;
           }
           
-          // Recurse into Default or any included directory
-          if (entry.name === 'Default' || includeDirs.includes(entry.name)) {
-            await this.collectSessionFiles(fullPath, baseDir, stats);
-          }
+          // Recurse into ALL other directories (including Default, IndexedDB, Local Storage, etc.)
+          await this.collectSessionFiles(fullPath, baseDir, stats);
         } else {
           // Skip these files (temporary/lock files)
           const skipFiles = [
@@ -350,9 +350,14 @@ class RemoteAuth extends BaseAuthStrategy {
         return false;
       }
 
-      logger.info(`[Session] Collecting session files...`);
+      logger.info(`[Session] Collecting session files from ${sessionPath}...`);
       const stats = await this.collectSessionFiles(sessionPath, sessionPath);
       const fileCount = Object.keys(stats.files).length;
+      const fileNames = Object.keys(stats.files);
+      
+      // Log what we collected for debugging
+      logger.info(`[Session] Collected ${fileCount} files (${(stats.totalSize/1024).toFixed(0)}KB)`);
+      logger.info(`[Session] Files: ${fileNames.slice(0, 15).join(', ')}${fileNames.length > 15 ? '...' : ''}`);
       
       if (fileCount === 0) {
         logger.warn('[Session] No files collected');
@@ -360,17 +365,16 @@ class RemoteAuth extends BaseAuthStrategy {
       }
       
       // Verify we have essential files
-      const fileNames = Object.keys(stats.files);
       const hasIndexedDB = fileNames.some(f => f.includes('IndexedDB'));
       const hasLocalStorage = fileNames.some(f => f.includes('Local Storage'));
+      const hasCookies = fileNames.some(f => f.includes('Cookies'));
+      
+      logger.info(`[Session] Has IndexedDB: ${hasIndexedDB}, LocalStorage: ${hasLocalStorage}, Cookies: ${hasCookies}`);
       
       if (!hasIndexedDB && !hasLocalStorage) {
         logger.warn(`[Session] Missing essential files (IndexedDB or LocalStorage)`);
-        logger.debug(`[Session] Files collected: ${fileNames.join(', ')}`);
         return false;
       }
-
-      logger.info(`[Session] Collected ${fileCount} files (${(stats.totalSize/1024).toFixed(0)}KB)`);
       
       // Compress
       const sessionData = {
