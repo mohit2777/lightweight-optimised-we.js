@@ -1,7 +1,9 @@
 /**
  * RemoteAuth Strategy for whatsapp-web.js
- * Stores WhatsApp session data in Supabase database instead of filesystem
- * Solves Render.com ephemeral storage issues
+ * Stores WhatsApp session data in Supabase database
+ * 
+ * SIMPLIFIED & ROBUST VERSION - Saves ALL essential session files
+ * No aggressive filtering - captures everything needed for session persistence
  */
 
 const { db } = require('../config/database');
@@ -15,108 +17,136 @@ const util = require('util');
 const gzip = util.promisify(zlib.gzip);
 const gunzip = util.promisify(zlib.gunzip);
 
+// Session size limits
+const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // 5MB max total
+const MAX_FILE_SIZE = 1024 * 1024; // 1MB max per file
+
 /**
  * Pre-restore session files from database BEFORE client initialization
- * This is called from whatsappManager BEFORE creating the Client
- * @param {string} accountId - The account ID
- * @param {string} dataPath - Base path for session storage
- * @returns {Promise<{restored: boolean, sessionPath: string}>}
+ * Called from whatsappManager BEFORE creating the Client
  */
 async function preRestoreSession(accountId, dataPath = './wa-sessions-temp') {
   const sessionPath = path.join(dataPath, accountId);
   
   try {
-    // Create directories
     await fs.mkdir(dataPath, { recursive: true });
     await fs.mkdir(sessionPath, { recursive: true });
     
-    logger.info(`[PreRestore] Checking session for: ${accountId}`);
+    logger.info(`[Session] Checking database for session: ${accountId}`);
     
     const sessionData = await db.getSessionData(accountId);
     
     if (!sessionData) {
-      logger.info(`[PreRestore] No session found in database for: ${accountId}`);
+      logger.info(`[Session] No saved session found for: ${accountId}`);
       return { restored: false, sessionPath };
     }
 
+    // Decode and parse
     const payloadJson = Buffer.from(sessionData, 'base64').toString('utf-8');
     let payloadObj;
     
     try {
       payloadObj = JSON.parse(payloadJson);
     } catch (e) {
-      logger.error('[PreRestore] Failed to parse session payload');
+      logger.error('[Session] Failed to parse session data - corrupted');
+      await db.clearSessionData(accountId);
       return { restored: false, sessionPath };
     }
 
     let files;
 
-    // Handle V2 (Compressed)
-    if (payloadObj.type === 'folder_dump_v2' && payloadObj.data) {
+    // Handle compressed format (V2)
+    if (payloadObj.type === 'session_v2' && payloadObj.data) {
+      try {
+        const compressedBuffer = Buffer.from(payloadObj.data, 'base64');
+        const decompressed = await gunzip(compressedBuffer);
+        const sessionObj = JSON.parse(decompressed.toString('utf-8'));
+        files = sessionObj.files;
+        logger.info(`[Session] Decompressed session: ${Object.keys(files).length} files`);
+      } catch (err) {
+        logger.error('[Session] Decompression failed:', err.message);
+        await db.clearSessionData(accountId);
+        return { restored: false, sessionPath };
+      }
+    } 
+    // Handle legacy formats
+    else if (payloadObj.type === 'folder_dump_v2' && payloadObj.data) {
       try {
         const compressedBuffer = Buffer.from(payloadObj.data, 'base64');
         const decompressed = await gunzip(compressedBuffer);
         const sessionObj = JSON.parse(decompressed.toString('utf-8'));
         files = sessionObj.files;
       } catch (err) {
-        logger.error('[PreRestore] Decompression failed:', err);
+        logger.error('[Session] Legacy decompression failed');
+        await db.clearSessionData(accountId);
         return { restored: false, sessionPath };
       }
-    } 
-    // Handle V1 (Uncompressed)
+    }
     else if (payloadObj.type === 'folder_dump') {
       files = payloadObj.files;
-    } 
-    // Handle Legacy/Unknown
+    }
     else {
-      logger.warn('[PreRestore] Unknown session format, cannot restore');
+      logger.warn('[Session] Unknown session format');
+      await db.clearSessionData(accountId);
       return { restored: false, sessionPath };
     }
 
     if (!files || Object.keys(files).length === 0) {
-      logger.warn('[PreRestore] No files found in session data');
+      logger.warn('[Session] Empty session data');
       return { restored: false, sessionPath };
     }
 
     const fileCount = Object.keys(files).length;
-    logger.info(`[PreRestore] Restoring ${fileCount} files to ${sessionPath}`);
+    logger.info(`[Session] Restoring ${fileCount} files to disk...`);
 
-    // Write all files
+    // Restore all files
+    let restoredCount = 0;
     for (const [relativePath, contentBase64] of Object.entries(files)) {
-      const fullPath = path.join(sessionPath, relativePath);
-      const dir = path.dirname(fullPath);
-      
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(fullPath, Buffer.from(contentBase64, 'base64'));
+      try {
+        const fullPath = path.join(sessionPath, relativePath);
+        const dir = path.dirname(fullPath);
+        
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(fullPath, Buffer.from(contentBase64, 'base64'));
+        restoredCount++;
+      } catch (err) {
+        logger.warn(`[Session] Failed to restore file: ${relativePath}`);
+      }
     }
     
-    logger.info(`[PreRestore] Session restored successfully for ${accountId}`);
+    logger.info(`[Session] ✅ Restored ${restoredCount}/${fileCount} files for ${accountId}`);
     return { restored: true, sessionPath };
     
   } catch (error) {
-    logger.error(`[PreRestore] Error restoring session for ${accountId}:`, error);
+    logger.error(`[Session] Restore error for ${accountId}:`, error.message);
     return { restored: false, sessionPath };
   }
 }
 
 /**
- * Check if session files already exist (pre-restored)
+ * Check if session files exist on disk
  */
 function hasPreRestoredSession(sessionPath) {
   try {
-    // Check for key session files that indicate valid pre-restored session
-    const defaultPath = path.join(sessionPath, 'Default');
-    const localStoragePath = path.join(defaultPath, 'Local Storage', 'leveldb');
-    
-    // Check if directory exists and has CURRENT file (LevelDB marker)
-    if (fsSync.existsSync(localStoragePath)) {
-      const files = fsSync.readdirSync(localStoragePath);
-      const hasLevelDB = files.some(f => f === 'CURRENT' || f.endsWith('.ldb'));
-      if (hasLevelDB) {
-        logger.info(`[RemoteAuth] Pre-restored session detected at ${sessionPath}`);
+    // Check for IndexedDB - the key WhatsApp storage
+    const indexedDbPath = path.join(sessionPath, 'Default', 'IndexedDB');
+    if (fsSync.existsSync(indexedDbPath)) {
+      const contents = fsSync.readdirSync(indexedDbPath);
+      if (contents.length > 0) {
+        logger.info(`[Session] Found existing session files at ${sessionPath}`);
         return true;
       }
     }
+    
+    // Also check Local Storage
+    const localStoragePath = path.join(sessionPath, 'Default', 'Local Storage', 'leveldb');
+    if (fsSync.existsSync(localStoragePath)) {
+      const files = fsSync.readdirSync(localStoragePath);
+      if (files.length > 0) {
+        return true;
+      }
+    }
+    
     return false;
   } catch (error) {
     return false;
@@ -127,9 +157,9 @@ class RemoteAuth extends BaseAuthStrategy {
   constructor(options = {}) {
     super();
     this.accountId = options.accountId;
-    this.clientId = options.accountId; // Required by whatsapp-web.js
+    this.clientId = options.accountId;
     this.dataPath = options.dataPath || './wa-sessions-temp';
-    this.sessionName = options.sessionName || 'session';
+    this.sessionRestored = false;
     
     if (!this.accountId) {
       throw new Error('accountId is required for RemoteAuth');
@@ -140,417 +170,253 @@ class RemoteAuth extends BaseAuthStrategy {
     super.setup(client);
   }
 
-  /**
-   * Required by whatsapp-web.js - Called after authentication is ready
-   */
   async afterAuthReady() {
-    logger.info(`[RemoteAuth] Auth ready for ${this.accountId}`);
-    // Trigger an initial save after auth is ready
-    setTimeout(() => this.saveSessionToDb(), 5000);
-  }
-
-  /**
-   * Required by whatsapp-web.js - Returns paths for session storage
-   */
-  async extractLocalAuthPaths() {
-    return {
-      dataPath: this.dataPath,
-      clientPath: path.join(this.dataPath, this.accountId)
-    };
+    logger.info(`[Session] Auth ready for ${this.accountId}`);
+    // Save session after authentication
+    setTimeout(() => this.saveSession(), 3000);
   }
 
   async beforeBrowserInitialized() {
-    // Create temporary directory for session files
     const sessionPath = path.join(this.dataPath, this.accountId);
     
     try {
       await fs.mkdir(this.dataPath, { recursive: true });
       await fs.mkdir(sessionPath, { recursive: true });
       
-      logger.info(`[RemoteAuth] Setting userDataDir: ${sessionPath}`);
+      logger.info(`[Session] Using data directory: ${sessionPath}`);
 
-      // CRITICAL: Tell Puppeteer to use this directory for storage
-      // This ensures that the browser saves data to the folder we are backing up
+      // Set Chrome to use this directory
       this.client.options.puppeteer = {
         ...this.client.options.puppeteer,
         userDataDir: sessionPath
       };
       
-      // Check if session was already pre-restored (by whatsappManager)
-      // If so, skip DB fetch to avoid timing issues
+      // Check if already restored
       if (hasPreRestoredSession(sessionPath)) {
-        logger.info(`[RemoteAuth] Session already pre-restored, skipping DB fetch`);
+        logger.info(`[Session] Session already on disk, ready to use`);
+        this.sessionRestored = true;
         return;
       }
       
-      // Fallback: try to restore from DB if not pre-restored
-      // (This is slow and may not finish before browser needs the files)
-      logger.warn(`[RemoteAuth] Session not pre-restored, attempting DB restore (may be slow)...`);
-      await this.restoreSessionFromDb();
+      // Try to restore from database
+      logger.info(`[Session] No local session, checking database...`);
+      const result = await preRestoreSession(this.accountId, this.dataPath);
+      this.sessionRestored = result.restored;
       
     } catch (error) {
-      logger.error('[RemoteAuth] Error creating temp directory:', error);
+      logger.error('[Session] Setup error:', error.message);
     }
   }
 
   async logout() {
-    logger.info(`[RemoteAuth] logout() called for account: ${this.accountId}`);
-    
-    // IMPORTANT: Do NOT automatically clear session data here!
-    // This method is called by whatsapp-web.js when it detects a disconnect,
-    // but we want to preserve the session for reconnection after app restarts.
-    // 
-    // The session will only be cleared when:
-    // 1. User explicitly deletes the account from dashboard
-    // 2. Too many failed QR attempts (corrupt session)
-    // 3. Authentication errors during init (corrupt session)
-    
-    logger.info(`[RemoteAuth] Session data PRESERVED for account: ${this.accountId}`);
-    logger.info(`[RemoteAuth] To clear session, delete the account from the dashboard.`);
-    
-    // Only clear temporary local files, NOT the database
+    logger.info(`[Session] Logout called for ${this.accountId} - preserving session data`);
+    // Do NOT clear session data automatically
+    // Only clear local temp files
     const sessionPath = path.join(this.dataPath, this.accountId);
     try {
       await fs.rm(sessionPath, { recursive: true, force: true });
-      logger.info(`[RemoteAuth] Local temp files cleared for: ${this.accountId}`);
-    } catch (error) {
-      logger.warn('[RemoteAuth] Could not delete temp session files:', error.message);
+    } catch (e) {
+      // Ignore
     }
   }
 
   async destroy() {
-    logger.info(`[RemoteAuth] Destroying session for account: ${this.accountId}`);
-    // We don't necessarily want to logout on destroy, just clean up local files
-    // await this.logout(); 
-    
-    // Just clean up local files
+    logger.info(`[Session] Destroy called for ${this.accountId}`);
+    // Clean local files only
     const sessionPath = path.join(this.dataPath, this.accountId);
     try {
       await fs.rm(sessionPath, { recursive: true, force: true });
-    } catch (error) {
-      logger.warn('[RemoteAuth] Could not delete temp session files on destroy:', error.message);
+    } catch (e) {
+      // Ignore
     }
   }
 
-  /**
-   * Extract session data from WhatsApp client
-   */
-  clientId() {
-    return this.accountId;
-  }
-
-  /**
-   * Get session path for temporary storage
-   */
   getSessionPath() {
     return path.join(this.dataPath, this.accountId);
   }
 
   /**
-   * Helper to recursively read ONLY essential files for WhatsApp session
-   * We're very aggressive here to keep total size under 3MB
+   * Collect all session files - simplified and robust
+   * Focuses on what WhatsApp actually needs: IndexedDB, LocalStorage, Cookies
    */
-  async readDirRecursive(dir, baseDir, stats = { totalSize: 0, fileCount: 0 }) {
-    const MAX_TOTAL_SIZE = 3 * 1024 * 1024; // 3MB max - very strict for Render 512MB limit
-    const MAX_FILE_SIZE = 500 * 1024; // 500KB max per file
-    
-    const files = await fs.readdir(dir, { withFileTypes: true });
-    let results = {};
-
-    for (const file of files) {
-      // Stop if we've exceeded max size
-      if (stats.totalSize > MAX_TOTAL_SIZE) {
-        logger.warn(`[RemoteAuth] Session size limit reached (${(stats.totalSize / 1024 / 1024).toFixed(2)}MB), stopping`);
-        break;
-      }
+  async collectSessionFiles(dir, baseDir, stats = { totalSize: 0, files: {} }) {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
       
-      const fullPath = path.join(dir, file.name);
-      const relativePath = path.relative(baseDir, fullPath);
-
-      if (file.isDirectory()) {
-        // ONLY keep these essential directories for WhatsApp session
-        const essentialDirs = [
-          'Default',
-          'Local Storage',
-          'leveldb',
-          'IndexedDB',
-          'https_web.whatsapp.com_0.indexeddb.leveldb',
-          'Session Storage'
-        ];
-        
-        // Skip everything except essential dirs
-        if (!essentialDirs.includes(file.name)) {
-          continue;
+      for (const entry of entries) {
+        if (stats.totalSize > MAX_TOTAL_SIZE) {
+          logger.warn(`[Session] Size limit reached: ${(stats.totalSize / 1024 / 1024).toFixed(2)}MB`);
+          break;
         }
         
-        const subResults = await this.readDirRecursive(fullPath, baseDir, stats);
-        Object.assign(results, subResults);
-      } else {
-        // Skip lock files, logs, and temporary files
-        const skipFiles = ['SingletonLock', 'LOCK', 'lockfile', 'LOG', 'LOG.old', 'DevToolsActivePort', 'CURRENT'];
-        const skipExtensions = ['.lock', '.log', '-journal', '.tmp'];
+        const fullPath = path.join(dir, entry.name);
+        const relativePath = path.relative(baseDir, fullPath);
         
-        // Only keep essential file types
-        const essentialFiles = ['Cookies', 'MANIFEST'];
-        const essentialExtensions = ['.ldb', '.sst'];
-        
-        const isEssential = essentialFiles.some(f => file.name.includes(f)) ||
-                          essentialExtensions.some(ext => file.name.endsWith(ext)) ||
-                          relativePath.includes('Local Storage') ||
-                          relativePath.includes('IndexedDB');
-        
-        if (!isEssential) {
-          continue;
-        }
-        
-        if (skipFiles.includes(file.name) || 
-            skipExtensions.some(ext => file.name.endsWith(ext)) ||
-            file.name.startsWith('.'))
-        {
-          continue;
-        }
-        
-        // Check file size before reading
-        try {
-          const fileStat = await fs.stat(fullPath);
-          if (fileStat.size > MAX_FILE_SIZE) {
-            logger.debug(`[RemoteAuth] Skipping large file: ${relativePath} (${(fileStat.size / 1024).toFixed(0)}KB)`);
+        if (entry.isDirectory()) {
+          // Include these directories
+          const includeDirs = [
+            'Default',
+            'IndexedDB',
+            'Local Storage',
+            'Session Storage',
+            'leveldb',
+            'https_web.whatsapp.com_0.indexeddb.leveldb'
+          ];
+          
+          // Skip these directories (cache, not needed for auth)
+          const skipDirs = [
+            'Cache', 
+            'Code Cache', 
+            'GPUCache', 
+            'DawnCache',
+            'ShaderCache',
+            'GrShaderCache',
+            'blob_storage',
+            'shared_proto_db',
+            'VideoDecodeStats',
+            'WebStorage',
+            'Crashpad',
+            'Service Worker',
+            'Network',
+            'optimization_guide_model_store'
+          ];
+          
+          if (skipDirs.includes(entry.name)) {
             continue;
           }
-          if (fileStat.size === 0) {
-            continue; // Skip empty files
+          
+          // Recurse into Default or any included directory
+          if (entry.name === 'Default' || includeDirs.includes(entry.name)) {
+            await this.collectSessionFiles(fullPath, baseDir, stats);
           }
-        } catch (e) {
-          continue;
-        }
-        
-        // Read file with retry logic
-        let content = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
+        } else {
+          // Skip these files (temporary/lock files)
+          const skipFiles = [
+            'SingletonLock',
+            'SingletonCookie', 
+            'SingletonSocket',
+            'DevToolsActivePort'
+          ];
+          
+          // Skip these extensions
+          const skipExtensions = [
+            '-journal',
+            '.tmp'
+          ];
+          
+          if (skipFiles.includes(entry.name)) continue;
+          if (skipExtensions.some(ext => entry.name.endsWith(ext))) continue;
+          if (entry.name.startsWith('.')) continue;
+          
+          // Check file size
           try {
-            content = await fs.readFile(fullPath);
-            break;
-          } catch (err) {
-            if (err.code === 'EBUSY' && attempt < 1) {
-              await new Promise(r => setTimeout(r, 100));
+            const fileStat = await fs.stat(fullPath);
+            if (fileStat.size === 0) continue;
+            if (fileStat.size > MAX_FILE_SIZE) {
+              logger.debug(`[Session] Skipping large file: ${relativePath} (${(fileStat.size/1024).toFixed(0)}KB)`);
               continue;
             }
-            break;
+            
+            // Read file
+            const content = await fs.readFile(fullPath);
+            stats.files[relativePath] = content.toString('base64');
+            stats.totalSize += content.length;
+          } catch (err) {
+            // Skip files we can't read (locked, etc)
+            continue;
           }
         }
-        
-        if (content) {
-          stats.totalSize += content.length;
-          stats.fileCount++;
-          results[relativePath] = content.toString('base64');
-        }
       }
+      
+      return stats;
+    } catch (error) {
+      logger.error(`[Session] Error collecting files:`, error.message);
+      return stats;
     }
-    return results;
   }
 
   /**
-   * Save full session directory to DB with compression
+   * Save session to database
    */
-  async saveSessionToDb() {
+  async saveSession() {
     try {
-      // Check memory before starting
-      const memUsage = process.memoryUsage();
-      const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
-      if (heapUsedMB > 400) {
-        logger.warn(`[RemoteAuth] Memory too high (${heapUsedMB.toFixed(0)}MB), skipping session save`);
-        return;
-      }
-      
       const sessionPath = this.getSessionPath();
-      // logger.debug(`[RemoteAuth] Scanning session files in ${sessionPath}`);
       
-      // Check if directory exists
+      // Verify directory exists
       try {
         await fs.access(sessionPath);
       } catch {
-        logger.warn(`[RemoteAuth] Session path does not exist: ${sessionPath}`);
-        return;
+        logger.warn(`[Session] No session directory found: ${sessionPath}`);
+        return false;
       }
 
-      logger.info(`[RemoteAuth] Collecting session files from ${sessionPath}...`);
-      const stats = { totalSize: 0, fileCount: 0 };
-      const files = await this.readDirRecursive(sessionPath, sessionPath, stats);
-      const fileCount = Object.keys(files).length;
-      const fileNames = Object.keys(files);
-      
-      logger.info(`[RemoteAuth] Collected ${fileCount} files (${(stats.totalSize / 1024).toFixed(0)}KB raw)`);
+      logger.info(`[Session] Collecting session files...`);
+      const stats = await this.collectSessionFiles(sessionPath, sessionPath);
+      const fileCount = Object.keys(stats.files).length;
       
       if (fileCount === 0) {
-        logger.warn('[RemoteAuth] No session files found to save');
-        return;
+        logger.warn('[Session] No files collected');
+        return false;
       }
       
-      // Validate we have essential session files (.ldb files are the key)
-      const hasEssentialFiles = fileNames.some(f => 
-        f.endsWith('.ldb') || 
-        f.includes('Cookies')
-      );
+      // Verify we have essential files
+      const fileNames = Object.keys(stats.files);
+      const hasIndexedDB = fileNames.some(f => f.includes('IndexedDB'));
+      const hasLocalStorage = fileNames.some(f => f.includes('Local Storage'));
       
-      if (!hasEssentialFiles) {
-        logger.warn(`[RemoteAuth] Session incomplete - no .ldb files found (collected: ${fileCount} files)`);
-        logger.warn(`[RemoteAuth] Files: ${fileNames.slice(0, 10).join(', ')}...`);
-        return;
-      }
-
-      // Check if JSON will be too large (rough estimate: base64 is ~1.37x)
-      const estimatedJsonSize = stats.totalSize * 1.37;
-      if (estimatedJsonSize > 5 * 1024 * 1024) {
-        logger.warn(`[RemoteAuth] Estimated JSON size too large (${(estimatedJsonSize / 1024 / 1024).toFixed(2)}MB), skipping save`);
-        return;
+      if (!hasIndexedDB && !hasLocalStorage) {
+        logger.warn(`[Session] Missing essential files (IndexedDB or LocalStorage)`);
+        logger.debug(`[Session] Files collected: ${fileNames.join(', ')}`);
+        return false;
       }
 
-      logger.info(`[RemoteAuth] Compressing ${fileCount} files (${(stats.totalSize / 1024).toFixed(0)}KB)...`);
+      logger.info(`[Session] Collected ${fileCount} files (${(stats.totalSize/1024).toFixed(0)}KB)`);
       
+      // Compress
       const sessionData = {
-        files: files,
-        timestamp: Date.now()
+        files: stats.files,
+        timestamp: Date.now(),
+        accountId: this.accountId
       };
-
-      // Use try-catch for JSON stringify (can fail with circular refs)
-      let sessionJson;
-      try {
-        sessionJson = JSON.stringify(sessionData);
-      } catch (e) {
-        logger.error(`[RemoteAuth] Failed to stringify session data:`, e.message);
-        return;
-      }
       
-      // Check actual JSON size
-      const jsonSizeKB = sessionJson.length / 1024;
-      if (jsonSizeKB > 5000) {
-        logger.warn(`[RemoteAuth] JSON too large (${jsonSizeKB.toFixed(0)}KB), aborting to prevent OOM`);
-        sessionJson = null;
-        return;
-      }
-      
-      logger.info(`[RemoteAuth] JSON size: ${jsonSizeKB.toFixed(0)}KB, compressing...`);
-      
-      const compressed = await gzip(sessionJson);
-      
-      // Free up memory immediately
-      sessionJson = null;
-      
+      const jsonString = JSON.stringify(sessionData);
+      const compressed = await gzip(jsonString);
       const compressedBase64 = compressed.toString('base64');
-
-      const storagePayload = JSON.stringify({
-        type: 'folder_dump_v2',
-        data: compressedBase64
+      
+      // Wrap in storage format
+      const payload = JSON.stringify({
+        type: 'session_v2',
+        data: compressedBase64,
+        savedAt: new Date().toISOString()
       });
       
-      const finalBase64 = Buffer.from(storagePayload).toString('base64');
+      const finalBase64 = Buffer.from(payload).toString('base64');
+      const finalSizeKB = (finalBase64.length / 1024).toFixed(2);
       
-      // Free up memory before DB call
-      const finalSize = finalBase64.length;
-      
-      logger.info(`[RemoteAuth] Saving to database (${(finalSize / 1024).toFixed(2)}KB compressed)...`);
+      logger.info(`[Session] Saving to database (${finalSizeKB}KB compressed)...`);
       
       await db.saveSessionData(this.accountId, finalBase64);
       
-      logger.info(`[RemoteAuth] ✅ Session saved successfully (${(finalSize / 1024).toFixed(2)}KB)`);
-      
-      // Trigger garbage collection if available
-      if (global.gc) {
-        global.gc();
-      }
-      
-    } catch (error) {
-      logger.error(`[RemoteAuth] Error saving session to DB:`, error.message);
-    }
-  }
-
-  /**
-   * Restore session from DB to file system
-   */
-  async restoreSessionFromDb() {
-    try {
-      logger.info(`[RemoteAuth] Attempting to restore session for: ${this.accountId}`);
-      
-      const sessionData = await db.getSessionData(this.accountId);
-      
-      if (!sessionData) {
-        logger.info(`[RemoteAuth] No session found in database for: ${this.accountId}`);
-        return false;
-      }
-
-      const payloadJson = Buffer.from(sessionData, 'base64').toString('utf-8');
-      let payloadObj;
-      
-      try {
-        payloadObj = JSON.parse(payloadJson);
-      } catch (e) {
-        logger.error('[RemoteAuth] Failed to parse session payload');
-        return false;
-      }
-
-      let files;
-
-      // Handle V2 (Compressed)
-      if (payloadObj.type === 'folder_dump_v2' && payloadObj.data) {
-        try {
-          const compressedBuffer = Buffer.from(payloadObj.data, 'base64');
-          const decompressed = await gunzip(compressedBuffer);
-          const sessionObj = JSON.parse(decompressed.toString('utf-8'));
-          files = sessionObj.files;
-        } catch (err) {
-          logger.error('[RemoteAuth] Decompression failed:', err);
-          return false;
-        }
-      } 
-      // Handle V1 (Uncompressed)
-      else if (payloadObj.type === 'folder_dump') {
-        files = payloadObj.files;
-      } 
-      // Handle Legacy/Unknown
-      else {
-        logger.warn('[RemoteAuth] Unknown session format, cannot restore');
-        return false;
-      }
-
-      if (!files) {
-        logger.warn('[RemoteAuth] No files found in session data');
-        return false;
-      }
-
-      const sessionPath = this.getSessionPath();
-      const fileCount = Object.keys(files).length;
-      
-      logger.info(`[RemoteAuth] Restoring ${fileCount} files to ${sessionPath}`);
-
-      for (const [relativePath, contentBase64] of Object.entries(files)) {
-        const fullPath = path.join(sessionPath, relativePath);
-        const dir = path.dirname(fullPath);
-        
-        await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(fullPath, Buffer.from(contentBase64, 'base64'));
-      }
-      
-      logger.info(`[RemoteAuth] Session restored successfully`);
+      logger.info(`[Session] ✅ Session saved successfully (${finalSizeKB}KB, ${fileCount} files)`);
       return true;
       
     } catch (error) {
-      logger.error(`[RemoteAuth] Error restoring session for ${this.accountId}:`, error);
+      logger.error(`[Session] Save error:`, error.message);
       return false;
     }
   }
 
   /**
-   * Legacy save method (kept for compatibility but redirects to saveSessionToDb)
+   * Restore session from database (used if pre-restore didn't happen)
    */
-  async save(session) {
-    // We ignore the session object passed here as we want to save the files
-    // But we can trigger the file save
-    await this.saveSessionToDb();
+  async restoreSession() {
+    return await preRestoreSession(this.accountId, this.dataPath);
   }
 }
 
-// Export both the class and the pre-restore function
-module.exports = RemoteAuth;
-module.exports.preRestoreSession = preRestoreSession;
-module.exports.hasPreRestoredSession = hasPreRestoredSession;
+module.exports = {
+  RemoteAuth,
+  preRestoreSession,
+  hasPreRestoredSession
+};
 

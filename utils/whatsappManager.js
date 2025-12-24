@@ -4,8 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { db } = require('../config/database');
 const axios = require('axios');
 const logger = require('./logger');
-const RemoteAuth = require('./RemoteAuth');
-const { preRestoreSession } = require('./RemoteAuth');
+const { RemoteAuth, preRestoreSession } = require('./RemoteAuth');
 const webhookDeliveryService = require('./webhookDeliveryService');
 const FlowEngine = require('../services/flowEngine');
 const flowState = require('../services/flowState');
@@ -337,7 +336,7 @@ class WhatsAppManager {
                 setTimeout(async () => {
                   try {
                     if (this.accountStatus.get(accountId) === 'ready') {
-                      await client.authStrategy.saveSessionToDb();
+                      await client.authStrategy.saveSession();
                       logger.info(`✅ [${accountId}] Deferred session save completed`);
                     }
                   } catch (e) {
@@ -347,7 +346,7 @@ class WhatsAppManager {
                 return;
               }
               
-              await client.authStrategy.saveSessionToDb();
+              await client.authStrategy.saveSession();
               logger.info(`✅ [${accountId}] Session saved to database`);
               
             } catch (err) {
@@ -365,7 +364,7 @@ class WhatsAppManager {
                 if (this.accountStatus.get(accountId) === 'ready') {
                   const mem = process.memoryUsage();
                   if (mem.heapUsed / 1024 / 1024 < 350) {
-                    await client.authStrategy.saveSessionToDb();
+                    await client.authStrategy.saveSession();
                   }
                 }
               } catch (err) {
@@ -1425,7 +1424,7 @@ class WhatsAppManager {
           if (this.accountStatus.get(accountId) === 'ready' && client.authStrategy instanceof RemoteAuth) {
             try {
               logger.info(`Saving session for account ${accountId} before shutdown...`);
-              await client.authStrategy.saveSessionToDb();
+              await client.authStrategy.saveSession();
               logger.info(`Session saved for account ${accountId}`);
             } catch (saveErr) {
               logger.warn(`Could not save session for ${accountId}: ${saveErr.message}`);
