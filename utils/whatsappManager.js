@@ -1,7 +1,7 @@
 /**
  * WhatsApp Manager - Optimized Version
  * Focused on minimal RAM usage and reliable session persistence
- * Removes: AI auto-reply, Flow Engine, heavy caching
+ * Uses RemoteAuth for database-backed session storage (Ranger-4 approach)
  */
 
 const { Client, MessageMedia } = require('whatsapp-web.js');
@@ -10,109 +10,40 @@ const { v4: uuidv4 } = require('uuid');
 const { db } = require('../config/database');
 const axios = require('axios');
 const logger = require('./logger');
-const { SupabaseAuth } = require('./SupabaseAuth');
+const RemoteAuth = require('./RemoteAuth');
 const webhookDeliveryService = require('./webhookDeliveryService');
 
 // Memory thresholds - aggressive for low-RAM environments (512MB Render free tier)
 const MEMORY_WARNING_THRESHOLD = 350 * 1024 * 1024; // 350MB
 const MEMORY_CRITICAL_THRESHOLD = 450 * 1024 * 1024; // 450MB
 
-// Find Chrome executable - checks common locations
-function findChrome() {
-  const fs = require('fs');
-  const path = require('path');
-  
-  // Check environment variable first
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-  
-  // Common Chrome locations on Render/Linux
-  const possiblePaths = [
-    // Puppeteer's default cache locations
-    path.join(process.env.HOME || '/opt/render', '.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'),
-    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
-    '/opt/render/project/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
-    // System Chrome
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    // Snap Chrome
-    '/snap/bin/chromium',
-  ];
-  
-  for (const pattern of possiblePaths) {
-    if (pattern.includes('*')) {
-      // Handle glob pattern
-      const dir = path.dirname(pattern.replace('/*/', '/'));
-      const baseDir = dir.split('*')[0];
-      try {
-        if (fs.existsSync(baseDir)) {
-          const glob = require('path').basename(pattern);
-          const parentDir = path.dirname(pattern);
-          // Try to find the actual directory
-          const entries = fs.readdirSync(baseDir.replace(/\/$/, ''));
-          for (const entry of entries) {
-            const fullPath = pattern.replace('linux-*', `linux-${entry.replace('linux-', '')}`).replace('*', entry);
-            const chromePath = path.join(baseDir, entry, 'chrome-linux64', 'chrome');
-            if (fs.existsSync(chromePath)) {
-              logger.info(`Found Chrome at: ${chromePath}`);
-              return chromePath;
-            }
-          }
-        }
-      } catch (e) {
-        // Continue searching
-      }
-    } else if (fs.existsSync(pattern)) {
-      logger.info(`Found Chrome at: ${pattern}`);
-      return pattern;
-    }
-  }
-  
-  // Let Puppeteer try to find it
-  logger.warn('Chrome not found in common locations, letting Puppeteer search...');
-  return undefined;
-}
-
-// Minimal Puppeteer config - optimized for Render.com free tier (512MB RAM, 0.1 vCPU)
+// Puppeteer config - Ranger-4 approach: Let whatsapp-web.js handle Chrome
+// No explicit executablePath - allows whatsapp-web.js to download Chromium if needed
 const PUPPETEER_CONFIG = {
-  headless: 'new', // Use new headless mode for better performance
-  executablePath: findChrome(),
+  headless: true,
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
     '--disable-accelerated-2d-canvas',
     '--no-first-run',
+    '--no-zygote',
     '--disable-gpu',
     '--disable-extensions',
+    '--disable-default-apps',
     '--mute-audio',
+    '--no-default-browser-check',
     '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
+    '--disable-background-networking',
     '--disable-breakpad',
     '--disable-sync',
     '--disable-translate',
-    '--disable-features=AudioServiceOutOfProcess,TranslateUI,IsolateOrigins,site-per-process',
-    '--disable-notifications',
-    '--disable-default-apps',
-    '--disable-hang-monitor',
-    '--disable-prompt-on-repost',
-    '--disable-client-side-phishing-detection',
-    '--disable-popup-blocking',
-    '--disable-component-update',
-    '--single-process', // Critical for low RAM - runs everything in one process
-    '--no-zygote',
-    '--memory-pressure-off',
-    '--disable-software-rasterizer',
-    '--disable-background-networking',
-    '--disable-domain-reliability',
-    '--js-flags=--max-old-space-size=128' // Limit browser JS heap
+    '--metrics-recording-only',
+    '--disable-hang-monitor'
   ],
-  defaultViewport: { width: 800, height: 600 },
-  timeout: 180000 // 3 minutes for slow 0.1 vCPU
+  defaultViewport: { width: 800, height: 600 }
 };
 
 class WhatsAppManager {
@@ -214,21 +145,25 @@ class WhatsAppManager {
         description: description,
         status: 'initializing',
         created_at: new Date().toISOString(),
-        metadata: { created_by: 'system', version: '3.0' }
+        metadata: { created_by: 'system', version: '3.0', auth: 'remote' }
       };
 
       const account = await db.createAccount(accountData);
 
-      // Create client with SupabaseAuth
+      // Create client with RemoteAuth (database-backed sessions)
       const client = new Client({
-        authStrategy: new SupabaseAuth({
+        authStrategy: new RemoteAuth({
           accountId: accountId,
           dataPath: './wa-sessions-temp'
         }),
-        puppeteer: PUPPETEER_CONFIG,
         webVersionCache: {
           type: 'remote',
           remotePath: 'https://raw.githubusercontent.com/pedroslopez/whatsapp-web.js/main/webVersion.json'
+        },
+        puppeteer: PUPPETEER_CONFIG,
+        queueOptions: { 
+          messageProcessingTimeoutMs: 15000,
+          concurrency: 5
         }
       });
 
@@ -754,13 +689,6 @@ class WhatsAppManager {
     this.reconnecting.add(account.id);
 
     try {
-      // Pre-restore session from Supabase
-      if (hasSession) {
-        logger.info(`Pre-restoring session for ${account.id}...`);
-        const { restored } = await SupabaseAuth.preRestoreSession(account.id, './wa-sessions-temp');
-        logger.info(`Session restore: ${restored ? 'success' : 'failed'}`);
-      }
-
       await db.updateAccount(account.id, {
         status: 'initializing',
         error_message: null,
@@ -769,15 +697,20 @@ class WhatsAppManager {
 
       this.qrCodes.delete(account.id);
 
+      // Create client with RemoteAuth (database-backed sessions)
       const client = new Client({
-        authStrategy: new SupabaseAuth({
+        authStrategy: new RemoteAuth({
           accountId: account.id,
           dataPath: './wa-sessions-temp'
         }),
-        puppeteer: PUPPETEER_CONFIG,
         webVersionCache: {
           type: 'remote',
           remotePath: 'https://raw.githubusercontent.com/pedroslopez/whatsapp-web.js/main/webVersion.json'
+        },
+        puppeteer: PUPPETEER_CONFIG,
+        queueOptions: { 
+          messageProcessingTimeoutMs: 15000,
+          concurrency: 5
         }
       });
 
@@ -787,7 +720,7 @@ class WhatsAppManager {
 
       client.initialize()
         .then(() => {
-          logger.info(`Client init started for ${account.name}`);
+          logger.info(`Client init started for ${account.name} [RemoteAuth]`);
         })
         .catch(async (error) => {
           logger.error(`Init error for ${account.id}:`, error);

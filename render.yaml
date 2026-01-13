@@ -1,12 +1,13 @@
 # Render Blueprint for WhatsApp Multi-Automation
 # Deploy with: render blueprint deploy
-# Uses Docker with Chrome pre-installed (works on free tier!)
+# Ranger-4 approach: Native Node runtime, whatsapp-web.js handles Chromium
 
 services:
   - type: web
     name: wa-multi-automation
-    runtime: docker
-    dockerfilePath: ./Dockerfile
+    runtime: node
+    buildCommand: npm ci
+    startCommand: node index.js
     
     # Health check configuration
     healthCheckPath: /health
@@ -17,10 +18,9 @@ services:
         value: production
       - key: PORT
         value: "10000"
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: "/usr/bin/google-chrome-stable"
-      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: "true"
+      
+      # Let whatsapp-web.js download its own Chromium
+      # No PUPPETEER_EXECUTABLE_PATH needed
       
       # Supabase (set these in Render dashboard)
       - key: SUPABASE_URL

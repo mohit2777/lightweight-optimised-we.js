@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-multi-automation",
-  "version": "3.0.5-docker",
+  "version": "3.0.6-ranger4",
   "description": "Optimized multi-account WhatsApp automation with Supabase session persistence",
   "main": "index.js",
   "scripts": {
