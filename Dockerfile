@@ -1,39 +1,49 @@
-FROM node:18-slim
+# Optimized Dockerfile for WhatsApp Multi-Automation
+# Minimal footprint, low RAM usage
 
-# Install dependencies for Puppeteer/Chromium
-RUN apt-get update \
-    && apt-get install -y wget gnupg \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
-      --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+FROM node:18-slim AS base
 
-# Set environment variables
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-ENV NODE_ENV=production
-ENV PORT=7860
+# Install Chromium and minimal dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-freefont-ttf \
+    libxss1 \
+    dumb-init \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/cache/apt/*
 
-# Create app directory
+# Environment variables for Puppeteer
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=256" \
+    PORT=7860
+
+# Create non-root user for security
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better caching
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install production dependencies only
+RUN npm ci --omit=dev --no-audit --no-fund \
+    && npm cache clean --force
 
-# Copy app source
-COPY . .
+# Copy application source
+COPY --chown=appuser:appgroup . .
 
-# Create temp directory for sessions
-RUN mkdir -p wa-sessions-temp && chmod 777 wa-sessions-temp
+# Create temp directories with proper permissions
+RUN mkdir -p wa-sessions-temp logs sessions \
+    && chown -R appuser:appgroup /app
 
-# Expose port
+# Switch to non-root user
+USER appuser
+
 EXPOSE 7860
 
-# Start the application
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["node", "index.js"]

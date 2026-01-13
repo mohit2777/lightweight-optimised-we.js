@@ -31,33 +31,12 @@ const requireGuest = (req, res, next) => {
   next();
 };
 
-// Session timeout middleware
+// Session timeout middleware - DISABLED (no limit)
 const checkSessionTimeout = (req, res, next) => {
+  // Session timeout removed - sessions never expire automatically
   if (req.session && req.session.authenticated) {
-    const sessionTimeout = 24 * 60 * 60 * 1000; // 24 hours
-    const lastActivity = req.session.lastActivity || req.session.loginTime;
-    
-    if (Date.now() - lastActivity > sessionTimeout) {
-      req.session.destroy((err) => {
-        if (err) {
-          logger.error('Error destroying expired session:', err);
-        }
-      });
-      
-      if (req.originalUrl.startsWith('/api/')) {
-        return res.status(401).json({ 
-          error: 'Session expired',
-          message: 'Your session has expired. Please login again.'
-        });
-      }
-      
-      return res.redirect('/login');
-    }
-    
-    // Update last activity
     req.session.lastActivity = Date.now();
   }
-  
   next();
 };
 

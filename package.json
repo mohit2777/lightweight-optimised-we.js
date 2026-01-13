@@ -1,21 +1,21 @@
 {
-  "name": "whatsapp-multi-automation-improved",
-  "version": "2.0.0",
-  "description": "Enhanced multi-account WhatsApp automation with improved data handling, modern dashboard, and Supabase database",
+  "name": "whatsapp-multi-automation",
+  "version": "3.0.1-lite",
+  "description": "Optimized multi-account WhatsApp automation with Supabase session persistence",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:lite": "node --expose-gc --max-old-space-size=200 index.lite.js",
+    "start:gc": "node --expose-gc index.js",
     "dev": "nodemon index.js",
-    "test": "node test.js"
+    "dev:lite": "nodemon index.lite.js"
   },
   "keywords": [
     "whatsapp",
     "automation",
     "multi-account",
-    "dashboard",
     "supabase",
-    "webhooks",
-    "n8n"
+    "webhooks"
   ],
   "author": "",
   "license": "MIT",
@@ -23,7 +23,6 @@
     "@supabase/supabase-js": "^2.38.4",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
-    "chart.js": "^4.5.1",
     "compression": "^1.7.4",
     "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.5",
@@ -34,7 +33,6 @@
     "fs-extra": "^11.1.1",
     "helmet": "^7.1.0",
     "joi": "^17.11.0",
-    "moment": "^2.29.4",
     "multer": "^2.0.0",
     "pg": "^8.16.3",
     "qrcode": "^1.5.3",

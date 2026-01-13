@@ -1,35 +1,28 @@
-# WhatsApp Multi-Automation V2 - Render Optimized Dockerfile
+# WhatsApp Multi-Automation - Render Optimized Dockerfile
 FROM node:18-slim
 
-# Install Google Chrome (more reliable than chromium package)
+# Install Google Chrome and minimal deps
 RUN apt-get update \
-    && apt-get install -y wget gnupg \
+    && apt-get install -y wget gnupg dumb-init \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y \
         google-chrome-stable \
-        fonts-ipafont-gothic \
-        fonts-wqy-zenhei \
-        fonts-thai-tlwg \
-        fonts-kacst \
         fonts-freefont-ttf \
         libxss1 \
-        dumb-init \
         --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/cache/apt/*
 
-# Set Puppeteer to use system Chrome and skip download
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
-ENV NODE_ENV=production
+# Set Puppeteer to use system Chrome
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome \
+    NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=256"
 
-# Memory optimization for containers
-ENV NODE_OPTIONS="--max-old-space-size=512"
-
-# Create non-root user for security
+# Create non-root user
 RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
     && mkdir -p /home/pptruser/Downloads /app \
     && chown -R pptruser:pptruser /home/pptruser /app
@@ -39,15 +32,15 @@ WORKDIR /app
 # Copy package files first (for better caching)
 COPY --chown=pptruser:pptruser package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production \
+# Install production deps only
+RUN npm ci --omit=dev --no-audit --no-fund \
     && npm cache clean --force
 
 # Copy app source
 COPY --chown=pptruser:pptruser . .
 
-# Create temp directory for sessions with proper permissions
-RUN mkdir -p wa-sessions-temp logs && chown -R pptruser:pptruser wa-sessions-temp logs
+# Create temp directories
+RUN mkdir -p wa-sessions-temp logs sessions && chown -R pptruser:pptruser wa-sessions-temp logs sessions
 
 # Switch to non-root user
 USER pptruser

@@ -14,15 +14,13 @@ require('dotenv').config();
 const pg = require('pg');
 const pgSession = require('connect-pg-simple')(session);
 
-const { requireAuth, requireGuest, checkSessionTimeout, login, logout, getCurrentUser, verifySessionIntegrity } = require('./middleware/auth');
+const { requireAuth, requireGuest, checkSessionTimeout, login, logout, getCurrentUser } = require('./middleware/auth');
 const { db, supabase, MissingWebhookQueueTableError } = require('./config/database');
 const whatsappManager = require('./utils/whatsappManager');
 const webhookDeliveryService = require('./utils/webhookDeliveryService');
-const aiAutoReplyService = require('./utils/aiAutoReply');
 const logger = require('./utils/logger');
 const { validate, schemas } = require('./utils/validator');
 const { apiLimiter, authLimiter, messageLimiter, webhookLimiter, accountLimiter } = require('./utils/rateLimiter');
-const flowRoutes = require('./routes/flowRoutes');
 
 const app = express();
 
@@ -274,11 +272,6 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), login);
 app.post('/api/auth/logout', logout);
 app.get('/api/auth/user', getCurrentUser);
 
-app.get('/api/auth/user', getCurrentUser);
-
-// Flow Builder API
-app.use('/api/chatbot', flowRoutes);
-
 // ============================================================================
 // DASHBOARD ROUTES
 // ============================================================================
@@ -293,10 +286,6 @@ app.get('/dashboard', requireAuth, (req, res) => {
 
 app.get('/dashboard.html', requireAuth, (req, res) => {
   res.redirect('/dashboard');
-});
-
-app.get('/flow-builder', requireAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, 'views', 'flow-builder.html'));
 });
 
 // ============================================================================
@@ -349,44 +338,28 @@ app.get('/api/accounts', requireAuth, apiLimiter, async (req, res) => {
   try {
     const accounts = await db.getAccounts();
 
-    // Get webhooks, chatbot configs, and flows for all accounts in parallel (with error handling)
-    let allWebhooks = [], allChatbotConfigs = [], allFlows = [];
+    // Get webhooks for all accounts (simplified)
+    let allWebhooks = [];
     try {
-      [allWebhooks, allChatbotConfigs, allFlows] = await Promise.all([
-        supabase.from('webhooks').select('account_id, is_active').then(r => r.data || []),
-        supabase.from('ai_auto_replies').select('account_id, is_active').then(r => r.data || []),
-        supabase.from('chatbot_flows').select('account_id, is_active').then(r => r.data || [])
-      ]);
+      const result = await supabase.from('webhooks').select('account_id, is_active');
+      allWebhooks = result.data || [];
     } catch (featureErr) {
-      logger.warn('Could not fetch feature indicators:', featureErr.message);
+      logger.warn('Could not fetch webhooks:', featureErr.message);
     }
 
-    // Enrich with real-time status from WhatsApp manager (overrides DB status)
+    // Enrich with real-time status from WhatsApp manager
     const enrichedAccounts = accounts.map(account => {
       const runtimeStatus = whatsappManager.getAccountStatus(account.id);
-      
-      // Get feature indicators for this account
       const accountWebhooks = allWebhooks.filter(w => w.account_id === account.id);
-      const accountChatbot = allChatbotConfigs.find(c => c.account_id === account.id);
-      const accountFlows = allFlows.filter(f => f.account_id === account.id);
       
       return {
         ...account,
         runtime_status: runtimeStatus,
-        // Use runtime status if available, otherwise fall back to DB status
         status: runtimeStatus || account.status,
-        // Feature indicators
         features: {
           webhooks: {
             count: accountWebhooks.length,
             active: accountWebhooks.filter(w => w.is_active).length
-          },
-          chatbot: {
-            enabled: accountChatbot?.is_active || false
-          },
-          flows: {
-            count: accountFlows.length,
-            active: accountFlows.filter(f => f.is_active).length
           }
         }
       };
@@ -418,6 +391,7 @@ app.post('/api/accounts', requireAuth, accountLimiter, validate(schemas.createAc
 app.get('/api/accounts/:id', requireAuth, apiLimiter, async (req, res) => {
   try {
     const account = await db.getAccount(req.params.id);
+
 
     if (!account) {
       return res.status(404).json({ error: 'Account not found' });
@@ -880,94 +854,6 @@ app.post('/api/send-list', requireAuth, messageLimiter, async (req, res) => {
   } catch (error) {
     logger.error('Error sending list:', error);
     res.status(500).json({ error: 'Failed to send list', message: error.message });
-  }
-});
-
-// ============================================================================
-// AI AUTO-REPLY / CHATBOT CONFIG API
-// ============================================================================
-
-// Get AI config for an account
-app.get('/api/accounts/:id/chatbot', requireAuth, apiLimiter, async (req, res) => {
-  try {
-    const config = await db.getAiConfig(req.params.id);
-    res.json(config || {});
-  } catch (error) {
-    logger.error(`Error fetching AI config for ${req.params.id}:`, error);
-    res.status(500).json({ error: 'Failed to fetch AI configuration' });
-  }
-});
-
-// Save AI config
-app.post('/api/accounts/:id/chatbot', requireAuth, apiLimiter, async (req, res) => {
-  try {
-    const accountId = req.params.id;
-    const { provider, model, api_key, system_prompt, temperature, is_active } = req.body;
-
-    if (!provider || !model) {
-      return res.status(400).json({ error: 'Provider and model are required' });
-    }
-
-    if (is_active && !api_key) {
-      return res.status(400).json({ error: 'API key is required when enabling AI replies' });
-    }
-
-    const saved = await aiAutoReplyService.saveConfig(accountId, {
-      provider,
-      model,
-      api_key,
-      system_prompt,
-      temperature,
-      is_active
-    });
-
-    res.json(saved);
-  } catch (error) {
-    logger.error(`Error saving AI config for ${req.params.id}:`, error);
-    res.status(500).json({ error: 'Failed to save AI configuration', message: error.message });
-  }
-});
-
-// Delete AI config
-app.delete('/api/accounts/:id/chatbot', requireAuth, apiLimiter, async (req, res) => {
-  try {
-    await aiAutoReplyService.deleteConfig(req.params.id);
-    res.json({ success: true });
-  } catch (error) {
-    logger.error(`Error deleting AI config for ${req.params.id}:`, error);
-    res.status(500).json({ error: 'Failed to delete AI configuration' });
-  }
-});
-
-// Test AI config with a single prompt (does not store config)
-app.post('/api/accounts/:id/chatbot/test', requireAuth, apiLimiter, async (req, res) => {
-  try {
-    const accountId = req.params.id;
-    const { provider, model, api_key, system_prompt, temperature, message } = req.body;
-
-    if (!provider || !model || !api_key) {
-      return res.status(400).json({ error: 'Provider, model, and API key are required for testing' });
-    }
-
-    const testMessage = message || 'Hello, this is a test message.';
-    const responseText = await aiAutoReplyService.testConfig({
-      accountId,
-      provider,
-      model,
-      api_key,
-      system_prompt,
-      temperature,
-      message: testMessage
-    });
-
-    if (!responseText) {
-      return res.status(500).json({ error: 'No response generated from AI provider' });
-    }
-
-    res.json({ response: responseText });
-  } catch (error) {
-    logger.error(`Error testing AI config for ${req.params.id}:`, error.response?.data || error.message);
-    res.status(500).json({ error: 'AI test failed', details: error.message });
   }
 });
 
@@ -1505,18 +1391,17 @@ app.use((err, req, res, next) => {
 
 async function initializeApp() {
   try {
-    logger.info('Initializing WhatsApp Multi-Automation System V2...');
+    logger.info('Initializing WhatsApp Multi-Automation System...');
 
     // Create sessions directory
-    const fs = require('fs-extra');
-    await fs.ensureDir('./sessions');
+    const fsExtra = require('fs-extra');
+    await fsExtra.ensureDir('./sessions');
+    await fsExtra.ensureDir('./wa-sessions-temp');
 
-    // Initialize flow controller with whatsappManager reference
-    const { initializeFlowController } = require('./controllers/flowController');
-    initializeFlowController(whatsappManager);
-
-    // Initialize existing accounts
+    // Initialize existing accounts from Supabase
     await whatsappManager.initializeExistingAccounts();
+    
+    // Start webhook delivery service
     try {
       await webhookDeliveryService.start();
     } catch (error) {

@@ -1,4 +1,4 @@
-# Render Blueprint for WhatsApp Multi-Automation V2
+# Render Blueprint for WhatsApp Multi-Automation
 # Deploy with: render blueprint deploy
 
 services:
@@ -18,7 +18,11 @@ services:
       - key: PORT
         value: "10000"
       - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/chromium
+        value: /usr/bin/google-chrome
+      
+      # Memory optimization
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=256"
       
       # Supabase (set these in Render dashboard)
       - key: SUPABASE_URL
@@ -38,15 +42,15 @@ services:
       - key: SESSION_COOKIE_SECURE
         value: "true"
       
-      # Database URL for session storage (optional - use Supabase connection string)
+      # Database URL for session storage
       - key: DATABASE_URL
         sync: false
       
-      # Egress optimization (recommended for free tier)
-      - key: DISABLE_MESSAGE_LOGGING
-        value: "true"
+      # Session persistence (enabled)
       - key: DISABLE_PERIODIC_SESSION_SAVE
-        value: "true"
+        value: "false"
+      - key: SESSION_SAVE_INTERVAL_MS
+        value: "900000"
       
       # Keepalive for free tier (prevents sleep)
       - key: KEEPALIVE_URL

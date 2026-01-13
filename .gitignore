@@ -4,33 +4,53 @@ package-lock.json
 
 # Environment variables
 .env
+.env.local
+.env.*.local
 
-# Session data
+# Session data (stored in Supabase, temp files only)
+wa-sessions-temp/
 sessions/
+.wwebjs_auth/
+.wwebjs_cache/
 
 # Logs
 logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # OS files
 .DS_Store
 Thumbs.db
-
-# IDE
-.vscode/
-.idea/
 *.swp
 *.swo
+*~
 
-# Build files
+# IDE/Editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Build outputs
 dist/
 build/
-
-# WhatsApp session data
-.wwebjs_auth/
-.wwebjs_cache/
-
-# Test files
 coverage/
+.nyc_output/
 
-wa-sessions-temp/
+# Temp files
+*.tmp
+*.temp
+.cache/
+
+# Optional npm cache
+.npm/
+
+# Debug files
+*.pid
+*.seed
+*.pid.lock
+
+# Runtime data
+pids/

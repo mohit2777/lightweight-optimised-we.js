@@ -1,7 +1,25 @@
 const axios = require('axios');
 const EventEmitter = require('events');
-const { db, MissingWebhookQueueTableError } = require('../config/database');
 const logger = require('./logger');
+
+// Lazy load database to support both full and lite mode
+let _db = null;
+let MissingWebhookQueueTableError = null;
+
+function getDb() {
+  if (!_db) {
+    try {
+      const dbModule = require('../config/database.lite');
+      _db = dbModule.db;
+      MissingWebhookQueueTableError = dbModule.MissingWebhookQueueTableError;
+    } catch {
+      const dbModule = require('../config/database');
+      _db = dbModule.db;
+      MissingWebhookQueueTableError = dbModule.MissingWebhookQueueTableError;
+    }
+  }
+  return _db;
+}
 
 class PermanentWebhookError extends Error {
   constructor(message, status) {
@@ -33,9 +51,9 @@ class WebhookDeliveryService extends EventEmitter {
     }
 
     try {
-      await db.resetStuckWebhookDeliveries();
+      await getDb().resetStuckWebhookDeliveries();
     } catch (error) {
-      if (error instanceof MissingWebhookQueueTableError) {
+      if (MissingWebhookQueueTableError && error instanceof MissingWebhookQueueTableError) {
         this.disableService('Missing database table webhook_delivery_queue. Apply the latest SQL migration.');
         return;
       }
@@ -79,7 +97,7 @@ class WebhookDeliveryService extends EventEmitter {
 
     try {
       await Promise.all(webhooks.map(webhook => {
-        return db.enqueueWebhookDelivery({
+        return getDb().enqueueWebhookDelivery({
           accountId,
           webhook,
           payload: this.buildPayload(webhook, sanitizedPayload),
@@ -87,7 +105,7 @@ class WebhookDeliveryService extends EventEmitter {
         });
       }));
     } catch (error) {
-      if (error instanceof MissingWebhookQueueTableError) {
+      if (MissingWebhookQueueTableError && error instanceof MissingWebhookQueueTableError) {
         this.disableService('Missing webhook_delivery_queue table while enqueueing deliveries');
         this.logMigrationHint();
       } else {
@@ -104,14 +122,14 @@ class WebhookDeliveryService extends EventEmitter {
     this.isProcessing = true;
 
     try {
-      const jobs = await db.getDueWebhookDeliveries(this.batchSize);
+      const jobs = await getDb().getDueWebhookDeliveries(this.batchSize);
       if (!jobs.length) {
         return;
       }
 
       await Promise.allSettled(jobs.map(job => this.processJob(job)));
     } catch (error) {
-      if (error instanceof MissingWebhookQueueTableError) {
+      if (MissingWebhookQueueTableError && error instanceof MissingWebhookQueueTableError) {
         this.disableService('Missing webhook_delivery_queue table while processing queue');
         this.logMigrationHint();
       } else {
@@ -129,9 +147,9 @@ class WebhookDeliveryService extends EventEmitter {
 
     let claimedJob;
     try {
-      claimedJob = await db.markWebhookDeliveryProcessing(job);
+      claimedJob = await getDb().markWebhookDeliveryProcessing(job);
     } catch (error) {
-      if (error instanceof MissingWebhookQueueTableError) {
+      if (MissingWebhookQueueTableError && error instanceof MissingWebhookQueueTableError) {
         this.disableService('Missing webhook_delivery_queue table while updating job state');
         this.logMigrationHint();
         return;
@@ -147,9 +165,9 @@ class WebhookDeliveryService extends EventEmitter {
 
     try {
       const response = await this.sendWebhookRequest(claimedJob);
-      await db.completeWebhookDelivery(claimedJob.id, response.status);
+      await getDb().completeWebhookDelivery(claimedJob.id, response.status);
 
-      await db.logMessage({
+      await getDb().logMessage({
         account_id: claimedJob.account_id,
         direction: 'webhook',
         status: 'success',
@@ -170,14 +188,14 @@ class WebhookDeliveryService extends EventEmitter {
       const nextAttempt = isDeadLetter ? null : new Date(Date.now() + backoffMs).toISOString();
 
       try {
-        await db.failWebhookDelivery(
+        await getDb().failWebhookDelivery(
           claimedJob,
           error.message,
           nextAttempt,
           isDeadLetter
         );
       } catch (dbError) {
-        if (dbError instanceof MissingWebhookQueueTableError) {
+        if (MissingWebhookQueueTableError && dbError instanceof MissingWebhookQueueTableError) {
           this.disableService('Missing webhook_delivery_queue table while recording failure');
           this.logMigrationHint();
           return;
@@ -185,7 +203,7 @@ class WebhookDeliveryService extends EventEmitter {
         throw dbError;
       }
 
-      await db.logMessage({
+      await getDb().logMessage({
         account_id: claimedJob.account_id,
         direction: 'webhook',
         status: isDeadLetter ? 'failed' : 'pending',
