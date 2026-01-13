@@ -1,0 +1,32 @@
+# Render.com Configuration - Optimized for Free Tier
+# Uses optimized version with reduced RAM usage
+
+services:
+  - type: web
+    name: whatsapp-gateway-optimized
+    runtime: docker
+    dockerfilePath: ./Dockerfile.optimized
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: true
+      - key: SESSION_COOKIE_SECURE
+        value: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DASHBOARD_USERNAME
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false

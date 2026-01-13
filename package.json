@@ -1,14 +1,16 @@
 {
   "name": "whatsapp-multi-automation",
-  "version": "3.0.1-lite",
+  "version": "3.0.2-optimized",
   "description": "Optimized multi-account WhatsApp automation with Supabase session persistence",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:optimized": "node --expose-gc --max-old-space-size=450 index.optimized.js",
     "start:lite": "node --expose-gc --max-old-space-size=200 index.lite.js",
     "start:gc": "node --expose-gc index.js",
     "dev": "nodemon index.js",
-    "dev:lite": "nodemon index.lite.js"
+    "dev:lite": "nodemon index.lite.js",
+    "dev:optimized": "nodemon index.optimized.js"
   },
   "keywords": [
     "whatsapp",
