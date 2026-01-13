@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-multi-automation",
-  "version": "3.0.3-render",
+  "version": "3.0.4-render",
   "description": "Optimized multi-account WhatsApp automation with Supabase session persistence",
   "main": "index.js",
   "scripts": {
@@ -11,7 +11,7 @@
     "dev": "nodemon index.js",
     "dev:lite": "nodemon index.lite.js",
     "dev:optimized": "nodemon index.optimized.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "install-chrome": "npx @puppeteer/browsers install chrome@stable"
   },
   "keywords": [
     "whatsapp",

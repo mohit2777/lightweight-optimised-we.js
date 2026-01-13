@@ -7,7 +7,7 @@ services:
   - type: web
     name: wa-multi-automation-lite
     runtime: node
-    buildCommand: npm install
+    buildCommand: npm ci && npx @puppeteer/browsers install chrome@stable
     startCommand: node --expose-gc --max-old-space-size=300 index.lite.js
     plan: free
     region: oregon
@@ -21,8 +21,8 @@ services:
         value: production
       - key: PORT
         value: "3000"
-      - key: PUPPETEER_CACHE_DIR
-        value: /opt/render/.cache/puppeteer
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: "true"
       
       # Memory limits (300MB max for lite)
       - key: NODE_OPTIONS

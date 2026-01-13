@@ -6,7 +6,7 @@ services:
   - type: web
     name: wa-multi-automation
     runtime: node
-    buildCommand: npm install
+    buildCommand: npm ci && npx @puppeteer/browsers install chrome@stable
     startCommand: node --expose-gc --max-old-space-size=384 index.optimized.js
     
     # Health check configuration
@@ -18,8 +18,8 @@ services:
         value: production
       - key: PORT
         value: "10000"
-      - key: PUPPETEER_CACHE_DIR
-        value: /opt/render/.cache/puppeteer
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: "true"
       
       # Memory optimization for 512MB RAM
       - key: NODE_OPTIONS

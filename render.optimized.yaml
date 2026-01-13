@@ -5,7 +5,7 @@ services:
   - type: web
     name: whatsapp-gateway-optimized
     runtime: node
-    buildCommand: npm install
+    buildCommand: npm ci && npx @puppeteer/browsers install chrome@stable
     startCommand: node --expose-gc --max-old-space-size=384 index.optimized.js
     plan: free
     region: oregon
@@ -15,8 +15,8 @@ services:
         value: production
       - key: PORT
         value: 10000
-      - key: PUPPETEER_CACHE_DIR
-        value: /opt/render/.cache/puppeteer
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: "true"
       - key: NODE_OPTIONS
         value: "--max-old-space-size=384 --expose-gc"
       - key: SESSION_COOKIE_SECURE

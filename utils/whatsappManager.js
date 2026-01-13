@@ -17,10 +17,69 @@ const webhookDeliveryService = require('./webhookDeliveryService');
 const MEMORY_WARNING_THRESHOLD = 350 * 1024 * 1024; // 350MB
 const MEMORY_CRITICAL_THRESHOLD = 450 * 1024 * 1024; // 450MB
 
+// Find Chrome executable - checks common locations
+function findChrome() {
+  const fs = require('fs');
+  const path = require('path');
+  
+  // Check environment variable first
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  
+  // Common Chrome locations on Render/Linux
+  const possiblePaths = [
+    // Puppeteer's default cache locations
+    path.join(process.env.HOME || '/opt/render', '.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'),
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
+    '/opt/render/project/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
+    // System Chrome
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    // Snap Chrome
+    '/snap/bin/chromium',
+  ];
+  
+  for (const pattern of possiblePaths) {
+    if (pattern.includes('*')) {
+      // Handle glob pattern
+      const dir = path.dirname(pattern.replace('/*/', '/'));
+      const baseDir = dir.split('*')[0];
+      try {
+        if (fs.existsSync(baseDir)) {
+          const glob = require('path').basename(pattern);
+          const parentDir = path.dirname(pattern);
+          // Try to find the actual directory
+          const entries = fs.readdirSync(baseDir.replace(/\/$/, ''));
+          for (const entry of entries) {
+            const fullPath = pattern.replace('linux-*', `linux-${entry.replace('linux-', '')}`).replace('*', entry);
+            const chromePath = path.join(baseDir, entry, 'chrome-linux64', 'chrome');
+            if (fs.existsSync(chromePath)) {
+              logger.info(`Found Chrome at: ${chromePath}`);
+              return chromePath;
+            }
+          }
+        }
+      } catch (e) {
+        // Continue searching
+      }
+    } else if (fs.existsSync(pattern)) {
+      logger.info(`Found Chrome at: ${pattern}`);
+      return pattern;
+    }
+  }
+  
+  // Let Puppeteer try to find it
+  logger.warn('Chrome not found in common locations, letting Puppeteer search...');
+  return undefined;
+}
+
 // Minimal Puppeteer config - optimized for Render.com free tier (512MB RAM, 0.1 vCPU)
 const PUPPETEER_CONFIG = {
   headless: 'new', // Use new headless mode for better performance
-  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Let Puppeteer find Chrome
+  executablePath: findChrome(),
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
