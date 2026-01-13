@@ -287,7 +287,7 @@ const db = {
       attempts: 0,
       max_retries: delivery.maxRetries || 3,
       created_at: new Date().toISOString(),
-      next_retry_at: new Date().toISOString()
+      next_attempt_at: new Date().toISOString()
     }]);
     if (error && isWebhookQueueMissing(error)) throw new MissingWebhookQueueTableError();
     if (error) throw error;
@@ -298,7 +298,7 @@ const db = {
       .from('webhook_delivery_queue')
       .select('*')
       .eq('status', 'pending')
-      .lte('next_retry_at', new Date().toISOString())
+      .lte('next_attempt_at', new Date().toISOString())
       .order('created_at', { ascending: true })
       .limit(limit);
     if (error && isWebhookQueueMissing(error)) throw new MissingWebhookQueueTableError();
@@ -341,7 +341,7 @@ const db = {
         status: 'pending',
         last_error: errorMsg,
         attempts,
-        next_retry_at: nextRetry
+        next_attempt_at: nextRetry
       }).eq('id', id);
     }
   },

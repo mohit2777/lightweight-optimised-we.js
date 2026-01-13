@@ -409,6 +409,8 @@ class WhatsAppManagerLite {
   async _collectSessionFiles(dir, baseDir, files, stats = { totalSize: 0 }) {
     const MAX_TOTAL = 10 * 1024 * 1024;
     const MAX_FILE = 3 * 1024 * 1024;
+    // Only these dirs are essential for WhatsApp session restoration
+    const ESSENTIAL_DIRS = ['IndexedDB', 'Local Storage'];
 
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -420,12 +422,22 @@ class WhatsAppManagerLite {
         const relPath = path.relative(baseDir, fullPath);
 
         if (entry.isDirectory()) {
-          // Only collect essential dirs
-          if (['IndexedDB', 'Local Storage', 'Default'].some(d => fullPath.includes(d))) {
+          // At Default level, only recurse into essential dirs
+          if (entry.name === 'Default') {
+            await this._collectSessionFiles(fullPath, baseDir, files, stats);
+          } else if (ESSENTIAL_DIRS.includes(entry.name)) {
+            // Recurse into IndexedDB and Local Storage
+            await this._collectSessionFiles(fullPath, baseDir, files, stats);
+          } else if (dir.includes('IndexedDB') || dir.includes('Local Storage')) {
+            // Inside essential dirs, recurse into subdirs (leveldb folders etc)
             await this._collectSessionFiles(fullPath, baseDir, files, stats);
           }
+          // Skip all other directories (Cache, GPUCache, Service Worker, etc)
         } else {
-          // Skip lock files and large files
+          // Only save files inside essential directories
+          if (!dir.includes('IndexedDB') && !dir.includes('Local Storage')) continue;
+          
+          // Skip lock files
           if (['LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'].includes(entry.name)) continue;
           
           const stat = await fs.stat(fullPath);
