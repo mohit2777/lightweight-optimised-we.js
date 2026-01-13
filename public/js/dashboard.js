@@ -924,7 +924,8 @@ async function showQRCode(accountId) {
             document.getElementById('qrCode').innerHTML = `
                 <div style="text-align: center; padding: 40px;">
                     <i class="fas fa-spinner fa-spin" style="font-size: 48px;"></i>
-                    <p style="margin-top: 20px;">${data.message || 'QR code is being generated...'}</p>
+                    <p style="margin-top: 20px;">Initializing WhatsApp...</p>
+                    <p style="margin-top: 10px; font-size: 0.85em; color: var(--text-secondary);">QR code will appear automatically</p>
                 </div>
             `;
         } else {
@@ -934,7 +935,7 @@ async function showQRCode(accountId) {
                     <i class="fas fa-qrcode" style="font-size: 48px; color: var(--text-secondary);"></i>
                     <p style="margin-top: 20px; color: var(--text-secondary);">No QR code available</p>
                     <button class="btn btn-primary" style="margin-top: 15px;" onclick="requestNewQR('${accountId}')">
-                        <i class="fas fa-sync-alt"></i> Request New QR Code
+                        <i class="fas fa-sync-alt"></i> Connect Account
                     </button>
                 </div>
             `;
@@ -959,7 +960,8 @@ async function requestNewQR(accountId) {
     qrCodeDiv.innerHTML = `
         <div style="text-align: center; padding: 40px;">
             <i class="fas fa-spinner fa-spin" style="font-size: 48px;"></i>
-            <p style="margin-top: 20px;">Requesting new QR code...</p>
+            <p style="margin-top: 20px;">Initializing WhatsApp...</p>
+            <p style="margin-top: 10px; font-size: 0.85em; color: var(--text-secondary);">This may take 30-60 seconds on first run</p>
         </div>
     `;
 
@@ -981,12 +983,12 @@ async function requestNewQR(accountId) {
             return;
         }
 
-        // Show generating message - QR will come via Socket.IO
+        // Show waiting message - QR will come via Socket.IO
         qrCodeDiv.innerHTML = `
             <div style="text-align: center; padding: 40px;">
                 <i class="fas fa-spinner fa-spin" style="font-size: 48px;"></i>
-                <p style="margin-top: 20px;">${data.message || 'Generating QR code...'}</p>
-                <p style="margin-top: 10px; font-size: 0.9em; color: var(--text-secondary);">QR code will appear automatically when ready</p>
+                <p style="margin-top: 20px;">Waiting for QR code...</p>
+                <p style="margin-top: 10px; font-size: 0.85em; color: var(--text-secondary);">QR code will appear automatically</p>
             </div>
         `;
 
@@ -996,6 +998,7 @@ async function requestNewQR(accountId) {
             <div style="text-align: center; padding: 40px;">
                 <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: var(--danger);"></i>
                 <p style="margin-top: 20px; color: var(--danger);">Failed to request QR code</p>
+                <p style="margin-top: 10px; font-size: 0.85em; color: var(--text-secondary);">${error.message}</p>
                 <button class="btn btn-primary" style="margin-top: 15px;" onclick="requestNewQR('${accountId}')">
                     <i class="fas fa-redo"></i> Try Again
                 </button>

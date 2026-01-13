@@ -20,7 +20,7 @@ const MEMORY_CRITICAL_THRESHOLD = 400 * 1024 * 1024; // 400MB
 // Minimal Puppeteer config - optimized for low RAM
 const PUPPETEER_CONFIG = {
   headless: true,
-  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || undefined,
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -198,35 +198,9 @@ class WhatsAppManager {
   setupEventHandlers(client, accountId) {
     client.removeAllListeners();
 
+    // Simple QR code handler - no regeneration logic, just emit when received
     client.on('qr', async (qr) => {
       try {
-        const attempts = (this.qrAttempts.get(accountId) || 0) + 1;
-        this.qrAttempts.set(accountId, attempts);
-
-        const maxQrAttempts = parseInt(process.env.MAX_QR_ATTEMPTS) || 10;
-        if (attempts > maxQrAttempts) {
-          logger.warn(`Account ${accountId} exceeded max QR attempts`);
-          
-          await db.clearSessionData(accountId);
-          await db.updateAccount(accountId, {
-            status: 'disconnected',
-            error_message: 'Session expired - reconnect manually',
-            updated_at: new Date().toISOString()
-          });
-
-          this.accountStatus.set(accountId, 'disconnected');
-          this.qrCodes.delete(accountId);
-
-          try {
-            client.removeAllListeners();
-            await client.destroy();
-          } catch (e) {}
-
-          this.clients.delete(accountId);
-          this.reconnecting.delete(accountId);
-          return;
-        }
-
         const qrDataUrl = await qrcode.toDataURL(qr);
         this.qrCodes.set(accountId, qrDataUrl);
 
@@ -239,7 +213,7 @@ class WhatsAppManager {
         this.accountStatus.set(accountId, 'qr_ready');
         this.emitToAll('qr', { accountId, qr: qrDataUrl });
         
-        logger.info(`QR generated for ${accountId} (attempt ${attempts}/${maxQrAttempts})`);
+        logger.info(`QR generated for ${accountId}`);
       } catch (error) {
         logger.error(`QR error for ${accountId}:`, error);
       }
@@ -258,7 +232,6 @@ class WhatsAppManager {
 
         this.accountStatus.set(accountId, 'ready');
         this.qrCodes.delete(accountId);
-        this.qrAttempts.delete(accountId);
 
         this.emitToAll('ready', { accountId, phoneNumber });
         logger.info(`✅ WhatsApp ready for ${accountId} (${phoneNumber})`);
@@ -295,7 +268,6 @@ class WhatsAppManager {
 
     client.on('authenticated', () => {
       logger.info(`Authenticated: ${accountId}`);
-      this.qrAttempts.delete(accountId);
       this.emitToAll('authenticated', { accountId });
     });
 
@@ -719,7 +691,6 @@ class WhatsAppManager {
     }
 
     this.reconnecting.add(account.id);
-    this.qrAttempts.delete(account.id);
 
     try {
       // Pre-restore session from Supabase

@@ -243,18 +243,9 @@ class WhatsAppManagerLite {
   _setupHandlers(client, accountId) {
     client.removeAllListeners();
 
-    // QR Code handler
+    // Simple QR Code handler - no regeneration logic
     client.on('qr', async (qr) => {
       try {
-        const attempts = (this.qrAttempts.get(accountId) || 0) + 1;
-        this.qrAttempts.set(accountId, attempts);
-
-        if (attempts > 10) {
-          logger.warn(`Max QR attempts reached for ${accountId}`);
-          await this._handleMaxQrAttempts(client, accountId);
-          return;
-        }
-
         const qrDataUrl = await qrcode.toDataURL(qr);
         this.qrCodes.set(accountId, qrDataUrl);
         this.accountStatus.set(accountId, 'qr_ready');
@@ -262,7 +253,7 @@ class WhatsAppManagerLite {
         await db.updateAccount(accountId, { status: 'qr_ready' }).catch(() => {});
         this._emit('qr', { accountId, qr: qrDataUrl });
         
-        logger.info(`📱 QR ready for ${accountId} (attempt ${attempts}/10)`);
+        logger.info(`📱 QR ready for ${accountId}`);
       } catch (e) {
         logger.error(`QR handler error:`, e.message);
       }
@@ -274,7 +265,6 @@ class WhatsAppManagerLite {
         const phone = client.info?.wid?.user || 'unknown';
         this.accountStatus.set(accountId, 'ready');
         this.qrCodes.delete(accountId);
-        this.qrAttempts.delete(accountId);
 
         await db.updateAccount(accountId, {
           status: 'ready',
@@ -300,7 +290,6 @@ class WhatsAppManagerLite {
     // Authenticated handler
     client.on('authenticated', () => {
       logger.info(`🔐 Authenticated: ${accountId}`);
-      this.qrAttempts.delete(accountId);
       this._emit('authenticated', { accountId });
     });
 

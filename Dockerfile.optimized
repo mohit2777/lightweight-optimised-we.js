@@ -33,9 +33,11 @@ RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
 
 WORKDIR /home/pptruser/app
 
-# Set Puppeteer environment
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# CRITICAL: Set Puppeteer to use system Chromium - MUST be before npm install
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV CHROME_BIN=/usr/bin/chromium
 ENV NODE_ENV=production
 
 # Copy package files
