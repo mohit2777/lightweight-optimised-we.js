@@ -1,14 +1,16 @@
 # Render Blueprint for WhatsApp Multi-Automation (LITE)
 # Ultra-low RAM version - Webhooks & API only
 # Deploy with: render blueprint deploy
+# Optimized for Free Tier (512MB RAM, 0.1 vCPU)
 
 services:
   - type: web
     name: wa-multi-automation-lite
-    runtime: docker
-    dockerfilePath: ./Dockerfile.lite
-    dockerContext: .
-    plan: starter  # 512MB RAM is enough for lite version
+    runtime: node
+    buildCommand: npm install && npx puppeteer browsers install chrome
+    startCommand: node --expose-gc --max-old-space-size=300 index.lite.js
+    plan: free
+    region: oregon
     
     # Health check
     healthCheckPath: /health
@@ -19,12 +21,12 @@ services:
         value: production
       - key: PORT
         value: "3000"
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/chromium-browser
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "false"
       
-      # Memory limits (200MB max)
+      # Memory limits (300MB max for lite)
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=200 --expose-gc"
+        value: "--max-old-space-size=300 --expose-gc"
       
       # Supabase
       - key: SUPABASE_URL

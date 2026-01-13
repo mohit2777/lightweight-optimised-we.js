@@ -42,8 +42,9 @@ Save these values for Render:
 2. Connect your GitHub repository
 3. Configure:
    - **Name**: `wa-multi-automation`
-   - **Environment**: Docker
-   - **Dockerfile Path**: `Dockerfile.render`
+   - **Environment**: Node
+   - **Build Command**: `npm install && npx puppeteer browsers install chrome`
+   - **Start Command**: `node --expose-gc --max-old-space-size=384 index.optimized.js`
    - **Plan**: Free (or Starter for better performance)
 
 ### 2.1 Environment Variables
@@ -59,9 +60,6 @@ DASHBOARD_PASSWORD=your-secure-password
 
 # HTTPS (Required for Render)
 SESSION_COOKIE_SECURE=true
-
-# Chromium Path (Set automatically in Dockerfile.render)
-PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Egress Optimization (Recommended for free tier)
 DISABLE_MESSAGE_LOGGING=true
@@ -101,12 +99,12 @@ KEEPALIVE_INTERVAL_MINUTES=14
 **Problem**: Chromium uses significant memory, especially with multiple accounts.
 
 **Solutions**:
-1. **Limit Accounts**: Free tier reliably supports 1-2 accounts
-2. **Memory Optimization**: Already configured in Dockerfile:
+1. **Limit Accounts**: Free tier reliably supports 1 account only
+2. **Memory Optimization**: Start command limits memory:
    ```
-   NODE_OPTIONS=--max-old-space-size=512
+   node --expose-gc --max-old-space-size=384 index.optimized.js
    ```
-3. **Upgrade Plan**: Starter tier has 2GB RAM
+3. **Upgrade Plan**: Starter tier has 2GB RAM for multiple accounts
 
 ### Issue 4: Slow Cold Starts
 **Problem**: First request after sleep takes 30-60 seconds.
@@ -120,9 +118,9 @@ KEEPALIVE_INTERVAL_MINUTES=14
 **Problem**: Puppeteer/Chromium not working correctly.
 
 **Checks**:
-1. Verify `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`
+1. Ensure build command includes `npx puppeteer browsers install chrome`
 2. Check Render logs for Chromium errors
-3. Ensure using `Dockerfile.render` (not regular Dockerfile)
+3. Verify Node.js version is 18+ (required for Puppeteer)
 
 ### Issue 6: Login Session Lost
 **Problem**: Dashboard login doesn't persist.
@@ -182,13 +180,6 @@ The `/health` endpoint returns:
 
 ## Troubleshooting Commands
 
-### Check Chromium
-```bash
-# In Render shell
-chromium --version
-which chromium
-```
-
 ### Check Memory
 ```bash
 # View current memory
@@ -211,7 +202,6 @@ Visit the dashboard and disconnect/reconnect the account to force a session save
 | `DASHBOARD_PASSWORD` | Yes | - | Dashboard login password |
 | `PORT` | No | 3000 | Server port (Render sets this) |
 | `SESSION_COOKIE_SECURE` | No | false | Set `true` for HTTPS |
-| `PUPPETEER_EXECUTABLE_PATH` | No | - | Path to Chromium binary |
 | `DISABLE_MESSAGE_LOGGING` | No | false | Skip storing messages |
 | `DISABLE_PERIODIC_SESSION_SAVE` | No | false | Only save on disconnect |
 | `SESSION_SAVE_INTERVAL_MS` | No | 900000 | Session save interval |

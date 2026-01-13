@@ -1,12 +1,13 @@
 # Render Blueprint for WhatsApp Multi-Automation
 # Deploy with: render blueprint deploy
+# Optimized for Render.com Free Tier (512MB RAM, 0.1 vCPU)
 
 services:
   - type: web
     name: wa-multi-automation
-    runtime: docker
-    dockerfilePath: ./Dockerfile.render
-    dockerContext: .
+    runtime: node
+    buildCommand: npm install && npx puppeteer browsers install chrome
+    startCommand: node --expose-gc --max-old-space-size=384 index.optimized.js
     
     # Health check configuration
     healthCheckPath: /health
@@ -17,12 +18,12 @@ services:
         value: production
       - key: PORT
         value: "10000"
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/google-chrome
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "false"
       
-      # Memory optimization
+      # Memory optimization for 512MB RAM
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=256"
+        value: "--max-old-space-size=384 --expose-gc"
       
       # Supabase (set these in Render dashboard)
       - key: SUPABASE_URL

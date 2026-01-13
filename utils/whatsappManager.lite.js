@@ -227,11 +227,11 @@ class WhatsAppManagerLite {
         dataPath: SESSION_PATH
       }),
       puppeteer: {
-        headless: true,
+        headless: 'new', // Use new headless mode for better performance
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: PUPPETEER_ARGS,
         defaultViewport: { width: 800, height: 600 },
-        timeout: 120000
+        timeout: 180000 // 3 minutes for slow 0.1 vCPU
       },
       webVersionCache: {
         type: 'remote',

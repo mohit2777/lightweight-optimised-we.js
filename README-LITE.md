@@ -26,7 +26,6 @@ npm run start:lite
 | `index.lite.js` | Ultra-lite Express server |
 | `utils/whatsappManager.lite.js` | Minimal WhatsApp manager |
 | `config/database.lite.js` | Tiny cache, lazy loading |
-| `Dockerfile.lite` | Optimized Docker image |
 | `render.lite.yaml` | Render.com deployment |
 
 ## 💡 Features Removed
@@ -47,20 +46,18 @@ npm run start:lite
 - ✅ QR code authentication
 - ✅ Basic message logging
 
-## 🐳 Docker Deployment
+## 🌐 Render.com Deployment
 
-```bash
-# Build lite image
-docker build -f Dockerfile.lite -t wa-lite .
+Deploy to Render.com free tier (512MB RAM, 0.1 vCPU):
 
-# Run with minimal resources
-docker run -d \
-  --memory=256m \
-  -e SUPABASE_URL=your_url \
-  -e SUPABASE_SERVICE_ROLE_KEY=your_key \
-  -p 3000:3000 \
-  wa-lite
-```
+1. Connect your GitHub repository to Render
+2. Create a new Web Service with these settings:
+   - **Runtime**: Node
+   - **Build Command**: `npm install && npx puppeteer browsers install chrome`
+   - **Start Command**: `node --expose-gc --max-old-space-size=300 index.lite.js`
+3. Set environment variables (see `.env.example`)
+
+Or use `render.lite.yaml` as a blueprint.
 
 ## 🌐 API Endpoints
 

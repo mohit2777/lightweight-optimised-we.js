@@ -1,11 +1,12 @@
 # Render.com Configuration - Optimized for Free Tier
-# Uses optimized version with reduced RAM usage
+# Uses optimized version with reduced RAM usage (512MB RAM, 0.1 vCPU)
 
 services:
   - type: web
     name: whatsapp-gateway-optimized
-    runtime: docker
-    dockerfilePath: ./Dockerfile.optimized
+    runtime: node
+    buildCommand: npm install && npx puppeteer browsers install chrome
+    startCommand: node --expose-gc --max-old-space-size=384 index.optimized.js
     plan: free
     region: oregon
     healthCheckPath: /health
@@ -14,10 +15,10 @@ services:
         value: production
       - key: PORT
         value: 10000
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/chromium
-      - key: PUPPETEER_SKIP_DOWNLOAD
-        value: true
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "false"
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=384 --expose-gc"
       - key: SESSION_COOKIE_SECURE
         value: true
       - key: SUPABASE_URL

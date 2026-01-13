@@ -664,24 +664,15 @@ KEEPALIVE_INTERVAL_MINUTES=14
 2. Set environment variables
 3. Deploy automatically
 
-### Docker
-```dockerfile
-FROM node:18-slim
-RUN apt-get update && apt-get install -y chromium
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]
-```
-
-### Render
+### Render (Free Tier Compatible)
 1. Create Web Service
 2. Connect repository
-3. Build command: `npm install`
-4. Start command: `npm start`
-5. Set environment variables
+3. Runtime: Node
+4. Build command: `npm install && npx puppeteer browsers install chrome`
+5. Start command: `node --expose-gc --max-old-space-size=384 index.optimized.js`
+6. Set environment variables (see `.env.example`)
+
+**Note**: Render free tier has 512MB RAM and 0.1 vCPU - supports 1 WhatsApp account.
 
 ---
 

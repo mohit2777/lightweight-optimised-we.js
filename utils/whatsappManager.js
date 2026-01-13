@@ -13,14 +13,14 @@ const logger = require('./logger');
 const { SupabaseAuth } = require('./SupabaseAuth');
 const webhookDeliveryService = require('./webhookDeliveryService');
 
-// Memory thresholds - aggressive for low-RAM environments
-const MEMORY_WARNING_THRESHOLD = 300 * 1024 * 1024; // 300MB
-const MEMORY_CRITICAL_THRESHOLD = 400 * 1024 * 1024; // 400MB
+// Memory thresholds - aggressive for low-RAM environments (512MB Render free tier)
+const MEMORY_WARNING_THRESHOLD = 350 * 1024 * 1024; // 350MB
+const MEMORY_CRITICAL_THRESHOLD = 450 * 1024 * 1024; // 450MB
 
-// Minimal Puppeteer config - optimized for low RAM
+// Minimal Puppeteer config - optimized for Render.com free tier (512MB RAM, 0.1 vCPU)
 const PUPPETEER_CONFIG = {
-  headless: true,
-  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || undefined,
+  headless: 'new', // Use new headless mode for better performance
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Let Puppeteer find Chrome
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -36,7 +36,7 @@ const PUPPETEER_CONFIG = {
     '--disable-breakpad',
     '--disable-sync',
     '--disable-translate',
-    '--disable-features=AudioServiceOutOfProcess,TranslateUI',
+    '--disable-features=AudioServiceOutOfProcess,TranslateUI,IsolateOrigins,site-per-process',
     '--disable-notifications',
     '--disable-default-apps',
     '--disable-hang-monitor',
@@ -44,14 +44,16 @@ const PUPPETEER_CONFIG = {
     '--disable-client-side-phishing-detection',
     '--disable-popup-blocking',
     '--disable-component-update',
-    '--single-process', // Important for low RAM
+    '--single-process', // Critical for low RAM - runs everything in one process
     '--no-zygote',
     '--memory-pressure-off',
-    '--max-old-space-size=256', // Limit V8 heap
-    '--js-flags="--max-old-space-size=256"'
+    '--disable-software-rasterizer',
+    '--disable-background-networking',
+    '--disable-domain-reliability',
+    '--js-flags=--max-old-space-size=128' // Limit browser JS heap
   ],
   defaultViewport: { width: 800, height: 600 },
-  timeout: 120000
+  timeout: 180000 // 3 minutes for slow 0.1 vCPU
 };
 
 class WhatsAppManager {
