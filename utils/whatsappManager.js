@@ -556,6 +556,11 @@ class WhatsAppManager {
         created_at: new Date().toISOString()
       };
 
+      // Log incoming message to database (for chatbot memory)
+      db.logMessage(messageData).catch(err => {
+        logger.warn(`Failed to log incoming message: ${err.message}`);
+      });
+
       // Update last active
       await db.updateAccount(accountId, {
         last_active_at: new Date().toISOString()
@@ -603,6 +608,24 @@ class WhatsAppManager {
                 
                 const result = await sock.sendMessage(replyJid, { text: aiResponse });
                 logger.info(`[Chatbot] ✅ Response sent to ${replyJid.split('@')[0]} (msgId: ${result?.key?.id?.slice(0, 10)}...)`);
+                
+                // Log outgoing message to database (for chatbot memory)
+                db.logMessage({
+                  account_id: accountId,
+                  direction: 'outgoing',
+                  message_id: result?.key?.id,
+                  sender: accountId,
+                  recipient: replyJid,
+                  message: aiResponse,
+                  timestamp: Date.now(),
+                  type: 'text',
+                  chat_id: replyJid,
+                  is_group: isGroup,
+                  status: 'success',
+                  created_at: new Date().toISOString()
+                }).catch(err => {
+                  logger.warn(`Failed to log outgoing message: ${err.message}`);
+                });
               }
               
               // Restore original typing delay
