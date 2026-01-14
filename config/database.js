@@ -725,25 +725,25 @@ const db = {
     }
     
     try {
-      // Normalize contact ID - could be '919876543210' or '919876543210@s.whatsapp.net'
-      const normalizedId = contactId.includes('@') ? contactId : `${contactId}@s.whatsapp.net`;
-      
+      // Use contactId as-is - it should already be the full JID (e.g., 123@s.whatsapp.net or 123@lid)
       // Query using chat_id which is consistently the full JID
       const { data, error } = await supabase
         .from('message_logs')
         .select('direction, message, created_at')
         .eq('account_id', accountId)
-        .eq('chat_id', normalizedId)
+        .eq('chat_id', contactId)
         .order('created_at', { ascending: false })
         .limit(limit);
+      
+      logger.debug(`[DB] getConversationHistory for ${contactId}: found ${data?.length || 0} messages`);
 
       if (error) throw error;
 
       // Return in chronological order (oldest first)
       const history = (data || []).reverse();
       
-      // Cache for 30 seconds
-      cacheManager.set(cacheKey, history, 30000);
+      // Cache for 5 seconds (short to ensure fresh data during conversation)
+      cacheManager.set(cacheKey, history, 5000);
       
       return history;
     } catch (error) {

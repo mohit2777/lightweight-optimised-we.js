@@ -118,8 +118,10 @@ class ChatbotManager {
    */
   async getConversationHistory(accountId, sender) {
     try {
+      logger.info(`[Chatbot] Fetching history for sender: ${sender}`);
       // Use the optimized DB method
       const logs = await db.getConversationHistory(accountId, sender, 10);
+      logger.info(`[Chatbot] Found ${logs.length} messages in history`);
 
       return logs.map(log => ({
         role: log.direction === 'incoming' ? 'user' : 'assistant',
