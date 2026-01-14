@@ -42,7 +42,7 @@ console.error = (...args) => {
 };
 // ============================================================================
 
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, jidDecode, jidNormalizedUser } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../config/database');
@@ -53,6 +53,50 @@ const chatbotManager = require('./chatbot');
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
+
+// LID to Phone Number mapping cache (in-memory, persisted to Supabase)
+const lidPhoneCache = new Map();
+
+// Utility: Extract phone number from JID (handles @s.whatsapp.net, @lid, @c.us, etc.)
+function extractPhoneNumber(jid) {
+  if (!jid) return null;
+  
+  // Check LID cache first
+  if (jid.endsWith('@lid') && lidPhoneCache.has(jid)) {
+    return lidPhoneCache.get(jid);
+  }
+  
+  // Parse the JID
+  const decoded = jidDecode(jid);
+  if (!decoded) return jid.split('@')[0]; // Fallback to raw user part
+  
+  // For @lid, we can only return the LID user for now (phone lookup happens later)
+  // For @s.whatsapp.net, @c.us - the user IS the phone number
+  return decoded.user;
+}
+
+// Utility: Get normalized chat ID (prefer phone format over LID)
+function getNormalizedChatId(jid) {
+  if (!jid) return null;
+  
+  // If it's a group, return as-is
+  if (jid.endsWith('@g.us')) return jid;
+  
+  // Try to get phone number and format as standard JID
+  const phone = extractPhoneNumber(jid);
+  if (phone && !jid.endsWith('@lid')) {
+    return `${phone}@s.whatsapp.net`;
+  }
+  
+  // For @lid, check cache
+  if (jid.endsWith('@lid') && lidPhoneCache.has(jid)) {
+    const cachedPhone = lidPhoneCache.get(jid);
+    return `${cachedPhone}@s.whatsapp.net`;
+  }
+  
+  // Return as-is if we can't normalize
+  return jid;
+}
 
 // Memory thresholds - aggressive for low-RAM environments (512MB Render free tier)
 const MEMORY_WARNING_THRESHOLD = 300 * 1024 * 1024; // 300MB
@@ -523,9 +567,15 @@ class WhatsAppManager {
         messageText = messageContent.videoMessage.caption;
       }
 
-      // Log incoming message
-      const sender = message.key.participant || message.key.remoteJid;
-      logger.info(`📩 Incoming message from ${sender.split('@')[0]}: "${messageText?.slice(0, 50) || '[media]'}"`);
+      // Get sender JID (original format - could be @lid or @s.whatsapp.net)
+      const senderJid = message.key.participant || message.key.remoteJid;
+      const chatJid = message.key.remoteJid;
+      
+      // Extract phone number from sender (works for @s.whatsapp.net, attempts lookup for @lid)
+      const senderPhone = extractPhoneNumber(senderJid);
+      
+      // Log with phone number
+      logger.info(`📩 Incoming message from ${senderPhone}: "${messageText?.slice(0, 50) || '[media]'}"`);
 
       // Determine message type
       let messageType = 'text';
@@ -537,19 +587,23 @@ class WhatsAppManager {
       else if (messageContent.contactMessage) messageType = 'contact';
       else if (messageContent.locationMessage) messageType = 'location';
 
-      const isGroup = message.key.remoteJid.endsWith('@g.us');
+      const isGroup = chatJid.endsWith('@g.us');
+      
+      // Use phone number for sender/recipient when possible (better for display and queries)
+      const normalizedSender = senderPhone;
+      const normalizedChatId = extractPhoneNumber(chatJid);
 
       const messageData = {
         event: 'message',  // Event type for webhook filtering
         account_id: accountId,
         direction: 'incoming',
         message_id: message.key.id,
-        sender: sender,
-        recipient: message.key.remoteJid,
+        sender: normalizedSender,
+        recipient: normalizedChatId,
         message: messageText,
         timestamp: message.messageTimestamp,
         type: messageType,
-        chat_id: message.key.remoteJid,
+        chat_id: normalizedChatId,  // Use phone number for consistent lookups
         is_group: isGroup,
         group_name: null,
         status: 'success',
@@ -577,23 +631,22 @@ class WhatsAppManager {
           logger.info(`[Chatbot] Processing message for account ${accountId}...`);
           const aiResponse = await chatbotManager.processMessage(accountId, {
             body: messageText,
-            from: sender,
+            from: normalizedSender,  // Use phone number for chatbot context
             getChat: async () => ({})
-          }, sender);
+          }, normalizedChatId);  // Use normalized chat ID for history lookup
 
           if (aiResponse) {
             logger.info(`[Chatbot] AI generated response: "${aiResponse.slice(0, 100)}..."`);
             
-            // Use the original sender JID directly (preserves exact format)
-            // For direct messages: use remoteJid, for groups: use participant
-            const replyJid = isGroup ? sender : message.key.remoteJid;
+            // Use the original JID for sending (Baileys needs exact format)
+            const replyJid = chatJid;
             
             try {
               // Reduce typing delay for faster response (500ms instead of 1500ms default)
               const originalTypingDelay = process.env.TYPING_DELAY_MS;
               process.env.TYPING_DELAY_MS = '500';
               
-              logger.info(`[Chatbot] Sending response to JID: ${replyJid}...`);
+              logger.info(`[Chatbot] Sending response to ${normalizedChatId}...`);
               
               // Send directly using sock.sendMessage with the exact JID
               const sock = this.clients.get(accountId);
@@ -607,19 +660,20 @@ class WhatsAppManager {
                 } catch {}
                 
                 const result = await sock.sendMessage(replyJid, { text: aiResponse });
-                logger.info(`[Chatbot] ✅ Response sent to ${replyJid.split('@')[0]} (msgId: ${result?.key?.id?.slice(0, 10)}...)`);
+                logger.info(`[Chatbot] ✅ Response sent to ${normalizedChatId} (msgId: ${result?.key?.id?.slice(0, 10)}...)`);
                 
                 // Log outgoing message to database (for chatbot memory)
+                // Use normalized phone number for consistent chat_id
                 db.logMessage({
                   account_id: accountId,
                   direction: 'outgoing',
                   message_id: result?.key?.id,
                   sender: accountId,
-                  recipient: replyJid,
+                  recipient: normalizedChatId,
                   message: aiResponse,
                   timestamp: Date.now(),
                   type: 'text',
-                  chat_id: replyJid,
+                  chat_id: normalizedChatId,  // Use phone number for consistent lookups
                   is_group: isGroup,
                   status: 'success',
                   created_at: new Date().toISOString()
