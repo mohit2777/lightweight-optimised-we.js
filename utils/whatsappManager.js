@@ -607,6 +607,20 @@ class WhatsAppManager {
       const messageContent = message.message;
       if (!messageContent) return;
 
+      // DEBUG: Log full message structure to find phone number
+      logger.info(`[DEBUG] Message keys: ${JSON.stringify(Object.keys(message))}`);
+      if (message.verifiedBizName) logger.info(`[DEBUG] verifiedBizName: ${message.verifiedBizName}`);
+      if (message.pushName) logger.info(`[DEBUG] pushName: ${message.pushName}`);
+      if (message.participant) logger.info(`[DEBUG] participant: ${message.participant}`);
+      if (message.messageStubParameters) logger.info(`[DEBUG] messageStubParameters: ${JSON.stringify(message.messageStubParameters)}`);
+      
+      // Log the full message for analysis (limited)
+      const debugMsg = JSON.stringify(message, (key, value) => {
+        if (key === 'message') return '[content]';
+        return value;
+      }).slice(0, 500);
+      logger.info(`[DEBUG] Full message: ${debugMsg}`);
+
       // Extract message text
       let messageText = '';
       if (messageContent.conversation) {
