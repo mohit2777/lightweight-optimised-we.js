@@ -2,6 +2,17 @@
 
 Multi-account WhatsApp automation using **Baileys** - No Chromium/Puppeteer required.
 
+## 🚀 Quick Deploy (Free)
+
+**[📖 Complete Setup Guide](SETUP-GUIDE.md)** - Deploy in 15 minutes using:
+- **Render** (Free hosting)
+- **Supabase** (Free database)
+- **UptimeRobot** (100% uptime)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+---
+
 ## Features
 
 - ✅ Multiple WhatsApp accounts

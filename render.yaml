@@ -1,0 +1,40 @@
+# Render Blueprint - One-Click Deploy
+# https://render.com/docs/infrastructure-as-code
+
+services:
+  - type: web
+    name: whatsapp-automation
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /ping
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: SESSION_COOKIE_SECURE
+        value: true
+      - key: TYPING_DELAY_MS
+        value: 1500
+      # Required - Set these in Render Dashboard
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DASHBOARD_USERNAME
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      # Optional - AI Provider Keys
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
