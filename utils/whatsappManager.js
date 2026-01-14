@@ -227,6 +227,7 @@ class WhatsAppManager {
     this.qrCodes = new Map();       // accountId -> qr data URL
     this.accountStatus = new Map(); // accountId -> status string
     this.reconnecting = new Set();
+    this.deletedAccounts = new Set(); // Track deleted accounts to prevent QR regeneration
     this.qrAttempts = new Map();
     this.isShuttingDown = false;
     this.io = null;
@@ -330,6 +331,12 @@ class WhatsAppManager {
   }
 
   async startBaileysClient(accountId) {
+    // Don't start client for deleted accounts
+    if (this.deletedAccounts.has(accountId)) {
+      logger.info(`Skipping client start - account ${accountId} was deleted`);
+      return null;
+    }
+
     try {
       // Get or create auth state
       const { state, saveCreds, saveAllToDatabase } = await useDBAuthState(accountId);
@@ -389,10 +396,21 @@ class WhatsAppManager {
   setupBaileysEventHandlers(sock, accountId, saveCreds) {
     // Connection update (QR code, connection state)
     sock.ev.on('connection.update', async (update) => {
+      // Skip all events if account was deleted
+      if (this.deletedAccounts.has(accountId)) {
+        logger.info(`Ignoring connection event for deleted account ${accountId}`);
+        return;
+      }
+
       const { connection, lastDisconnect, qr } = update;
 
       // QR Code received
       if (qr) {
+        // Double-check account wasn't deleted before generating QR
+        if (this.deletedAccounts.has(accountId)) {
+          logger.info(`Skipping QR generation - account ${accountId} was deleted`);
+          return;
+        }
         try {
           const qrDataUrl = await qrcode.toDataURL(qr);
           this.qrCodes.set(accountId, qrDataUrl);
@@ -464,11 +482,12 @@ class WhatsAppManager {
           this.accountStatus.set(accountId, 'logged_out');
           this.clients.delete(accountId);
         } else if (shouldReconnect && !this.isShuttingDown) {
-          // Try to reconnect
+          // Try to reconnect (unless account was deleted)
           this.accountStatus.set(accountId, 'reconnecting');
           
           setTimeout(async () => {
-            if (!this.isShuttingDown && !this.reconnecting.has(accountId)) {
+            // Don't reconnect if account was deleted or shutting down
+            if (!this.isShuttingDown && !this.reconnecting.has(accountId) && !this.deletedAccounts.has(accountId)) {
               logger.info(`Attempting reconnect for ${accountId}...`);
               try {
                 await this.startBaileysClient(accountId);
@@ -476,6 +495,8 @@ class WhatsAppManager {
                 logger.error(`Reconnect failed for ${accountId}:`, err.message);
                 this.accountStatus.set(accountId, 'disconnected');
               }
+            } else if (this.deletedAccounts.has(accountId)) {
+              logger.info(`Skipping reconnect - account ${accountId} was deleted`);
             }
           }, 3000);
         } else {
@@ -939,11 +960,16 @@ class WhatsAppManager {
 
   async deleteAccount(accountId) {
     try {
+      // Mark as deleted FIRST to prevent QR regeneration/reconnection
+      this.deletedAccounts.add(accountId);
+      logger.info(`Marking account ${accountId} as deleted - stopping all activity`);
+
       await this.safeDisposeClient(accountId);
 
       this.qrCodes.delete(accountId);
       this.accountStatus.delete(accountId);
       this.reconnecting.delete(accountId);
+      this.qrAttempts.delete(accountId);
 
       // Clear session files
       const sessionPath = path.join('./wa-sessions-temp', accountId);
