@@ -523,6 +523,10 @@ class WhatsAppManager {
         messageText = messageContent.videoMessage.caption;
       }
 
+      // Log incoming message
+      const sender = message.key.participant || message.key.remoteJid;
+      logger.info(`📩 Incoming message from ${sender.split('@')[0]}: "${messageText?.slice(0, 50) || '[media]'}"`);
+
       // Determine message type
       let messageType = 'text';
       if (messageContent.imageMessage) messageType = 'image';
@@ -566,6 +570,7 @@ class WhatsAppManager {
       // Process through chatbot (if enabled for this account)
       if (messageText && !isGroup) {
         try {
+          logger.info(`[Chatbot] Processing message for account ${accountId}...`);
           const aiResponse = await chatbotManager.processMessage(accountId, {
             body: messageText,
             from: sender,
@@ -573,6 +578,7 @@ class WhatsAppManager {
           }, sender);
 
           if (aiResponse) {
+            logger.info(`[Chatbot] AI generated response: "${aiResponse.slice(0, 100)}..."`);
             // Use the same sendMessage method as dashboard (with proper typing & encryption)
             // Extract phone number from sender JID
             const phoneNumber = sender.split('@')[0];
@@ -582,6 +588,7 @@ class WhatsAppManager {
               const originalTypingDelay = process.env.TYPING_DELAY_MS;
               process.env.TYPING_DELAY_MS = '500';
               
+              logger.info(`[Chatbot] Sending response to ${phoneNumber}...`);
               const result = await this.sendMessage(accountId, phoneNumber, aiResponse);
               
               // Restore original typing delay
@@ -591,9 +598,9 @@ class WhatsAppManager {
                 delete process.env.TYPING_DELAY_MS;
               }
               
-              logger.info(`[Chatbot] Sent AI response to ${phoneNumber} (msgId: ${result.messageId?.slice(0, 10)}...)`);
+              logger.info(`[Chatbot] ✅ Response sent to ${phoneNumber} (msgId: ${result.messageId?.slice(0, 10)}...)`);
             } catch (sendError) {
-              logger.error(`[Chatbot] Failed to send response: ${sendError.message}`);
+              logger.error(`[Chatbot] ❌ Failed to send response: ${sendError.message}`);
             }
           }
         } catch (chatbotError) {
