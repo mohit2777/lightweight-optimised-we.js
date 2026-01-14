@@ -42,7 +42,7 @@ console.error = (...args) => {
 };
 // ============================================================================
 
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, jidDecode, jidNormalizedUser } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, jidDecode, jidNormalizedUser, makeInMemoryStore } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../config/database');
@@ -54,48 +54,62 @@ const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
 
-// LID to Phone Number mapping cache (in-memory, persisted to Supabase)
+// LID to Phone Number mapping cache (in-memory)
 const lidPhoneCache = new Map();
 
-// Utility: Extract phone number from JID (handles @s.whatsapp.net, @lid, @c.us, etc.)
-function extractPhoneNumber(jid) {
+// In-memory store for contacts (used for LID to phone lookups)
+const contactStores = new Map();
+
+/**
+ * Get actual phone number from any JID format
+ * For @lid contacts, looks up the real phone number from contacts or cache
+ * @param {string} jid - The JID (can be @lid, @s.whatsapp.net, @c.us, etc.)
+ * @param {object} sock - Baileys socket (optional, for contact lookup)
+ * @returns {string} Phone number with country code (e.g., "918949171377")
+ */
+function getPhoneNumber(jid, sock = null) {
   if (!jid) return null;
-  
-  // Check LID cache first
-  if (jid.endsWith('@lid') && lidPhoneCache.has(jid)) {
-    return lidPhoneCache.get(jid);
-  }
   
   // Parse the JID
   const decoded = jidDecode(jid);
-  if (!decoded) return jid.split('@')[0]; // Fallback to raw user part
+  if (!decoded) return jid.split('@')[0];
   
-  // For @lid, we can only return the LID user for now (phone lookup happens later)
-  // For @s.whatsapp.net, @c.us - the user IS the phone number
-  return decoded.user;
+  // If it's NOT an @lid, the user part IS the phone number
+  if (!jid.endsWith('@lid')) {
+    return decoded.user; // e.g., "918949171377"
+  }
+  
+  // For @lid, check cache first
+  const lidUser = decoded.user;
+  if (lidPhoneCache.has(lidUser)) {
+    return lidPhoneCache.get(lidUser);
+  }
+  
+  // Try to look up from contact store
+  if (sock && sock.store) {
+    const contact = sock.store.contacts?.[jid];
+    if (contact?.phoneNumber) {
+      const phone = contact.phoneNumber.replace(/[^0-9]/g, '');
+      lidPhoneCache.set(lidUser, phone);
+      return phone;
+    }
+  }
+  
+  // Return LID user as fallback (will show as internal ID until we get the phone)
+  return lidUser;
 }
 
-// Utility: Get normalized chat ID (prefer phone format over LID)
-function getNormalizedChatId(jid) {
-  if (!jid) return null;
-  
-  // If it's a group, return as-is
-  if (jid.endsWith('@g.us')) return jid;
-  
-  // Try to get phone number and format as standard JID
-  const phone = extractPhoneNumber(jid);
-  if (phone && !jid.endsWith('@lid')) {
-    return `${phone}@s.whatsapp.net`;
+/**
+ * Store LID to phone mapping (call this when we discover the mapping)
+ */
+function storeLidPhoneMapping(lid, phone) {
+  if (!lid || !phone) return;
+  const decoded = jidDecode(lid);
+  if (decoded && lid.endsWith('@lid')) {
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    lidPhoneCache.set(decoded.user, cleanPhone);
+    logger.debug(`[LID Cache] Mapped ${decoded.user} → ${cleanPhone}`);
   }
-  
-  // For @lid, check cache
-  if (jid.endsWith('@lid') && lidPhoneCache.has(jid)) {
-    const cachedPhone = lidPhoneCache.get(jid);
-    return `${cachedPhone}@s.whatsapp.net`;
-  }
-  
-  // Return as-is if we can't normalize
-  return jid;
 }
 
 // Memory thresholds - aggressive for low-RAM environments (512MB Render free tier)
@@ -340,6 +354,10 @@ class WhatsAppManager {
 
       // Store for message retry (fixes "Waiting for this message" issue)
       const messageRetryMap = new Map();
+      
+      // Create in-memory store for contacts (enables LID to phone lookup)
+      const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+      contactStores.set(accountId, store);
 
       const sock = makeWASocket({
         version,
@@ -364,10 +382,15 @@ class WhatsAppManager {
           if (messageRetryMap.has(key.id)) {
             return messageRetryMap.get(key.id);
           }
-          return { conversation: '' };
+          // Try from store
+          return store.loadMessage(key.remoteJid, key.id);
         },
         msgRetryCounterCache: messageRetryMap
       });
+      
+      // Bind store to socket events (populates contacts, chats, messages)
+      store.bind(sock.ev);
+      sock.store = store;
 
       // Store messageRetryMap with the client for later use
       sock.messageRetryMap = messageRetryMap;
@@ -501,6 +524,35 @@ class WhatsAppManager {
         authState.saveAllToDatabase().catch(() => {});
       }
     });
+    
+    // Contacts update - capture LID to phone number mappings
+    sock.ev.on('contacts.update', async (contacts) => {
+      for (const contact of contacts) {
+        // If contact has both lid and phoneNumber, store the mapping
+        if (contact.id && contact.phoneNumber) {
+          storeLidPhoneMapping(contact.id, contact.phoneNumber);
+        }
+        // Also check if id is LID and there's a linked PN
+        if (contact.lid && contact.id) {
+          // contact.id might be the phone number format
+          if (!contact.id.endsWith('@lid')) {
+            storeLidPhoneMapping(contact.lid, contact.id.split('@')[0]);
+          }
+        }
+      }
+    });
+    
+    // Contacts upsert - same as update
+    sock.ev.on('contacts.upsert', async (contacts) => {
+      for (const contact of contacts) {
+        if (contact.id && contact.phoneNumber) {
+          storeLidPhoneMapping(contact.id, contact.phoneNumber);
+        }
+        if (contact.lid && contact.id && !contact.id.endsWith('@lid')) {
+          storeLidPhoneMapping(contact.lid, contact.id.split('@')[0]);
+        }
+      }
+    });
 
     // Incoming messages
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
@@ -571,10 +623,12 @@ class WhatsAppManager {
       const senderJid = message.key.participant || message.key.remoteJid;
       const chatJid = message.key.remoteJid;
       
-      // Extract phone number from sender (works for @s.whatsapp.net, attempts lookup for @lid)
-      const senderPhone = extractPhoneNumber(senderJid);
+      // Get actual phone number with country code (e.g., "918949171377")
+      // For @lid contacts, tries to look up from contact store
+      const senderPhone = getPhoneNumber(senderJid, sock);
+      const chatPhone = getPhoneNumber(chatJid, sock);
       
-      // Log with phone number
+      // Log with actual phone number
       logger.info(`📩 Incoming message from ${senderPhone}: "${messageText?.slice(0, 50) || '[media]'}"`);
 
       // Determine message type
@@ -588,22 +642,18 @@ class WhatsAppManager {
       else if (messageContent.locationMessage) messageType = 'location';
 
       const isGroup = chatJid.endsWith('@g.us');
-      
-      // Use phone number for sender/recipient when possible (better for display and queries)
-      const normalizedSender = senderPhone;
-      const normalizedChatId = extractPhoneNumber(chatJid);
 
       const messageData = {
         event: 'message',  // Event type for webhook filtering
         account_id: accountId,
         direction: 'incoming',
         message_id: message.key.id,
-        sender: normalizedSender,
-        recipient: normalizedChatId,
+        sender: senderPhone,  // Phone number with country code
+        recipient: chatPhone,  // Phone number with country code
         message: messageText,
         timestamp: message.messageTimestamp,
         type: messageType,
-        chat_id: normalizedChatId,  // Use phone number for consistent lookups
+        chat_id: chatPhone,  // Phone number for consistent lookups
         is_group: isGroup,
         group_name: null,
         status: 'success',
@@ -631,9 +681,9 @@ class WhatsAppManager {
           logger.info(`[Chatbot] Processing message for account ${accountId}...`);
           const aiResponse = await chatbotManager.processMessage(accountId, {
             body: messageText,
-            from: normalizedSender,  // Use phone number for chatbot context
+            from: senderPhone,  // Use phone number for chatbot context
             getChat: async () => ({})
-          }, normalizedChatId);  // Use normalized chat ID for history lookup
+          }, chatPhone);  // Use phone number for history lookup
 
           if (aiResponse) {
             logger.info(`[Chatbot] AI generated response: "${aiResponse.slice(0, 100)}..."`);
@@ -646,7 +696,7 @@ class WhatsAppManager {
               const originalTypingDelay = process.env.TYPING_DELAY_MS;
               process.env.TYPING_DELAY_MS = '500';
               
-              logger.info(`[Chatbot] Sending response to ${normalizedChatId}...`);
+              logger.info(`[Chatbot] Sending response to ${chatPhone}...`);
               
               // Send directly using sock.sendMessage with the exact JID
               const sock = this.clients.get(accountId);
@@ -660,20 +710,19 @@ class WhatsAppManager {
                 } catch {}
                 
                 const result = await sock.sendMessage(replyJid, { text: aiResponse });
-                logger.info(`[Chatbot] ✅ Response sent to ${normalizedChatId} (msgId: ${result?.key?.id?.slice(0, 10)}...)`);
+                logger.info(`[Chatbot] ✅ Response sent to ${chatPhone} (msgId: ${result?.key?.id?.slice(0, 10)}...)`);
                 
                 // Log outgoing message to database (for chatbot memory)
-                // Use normalized phone number for consistent chat_id
                 db.logMessage({
                   account_id: accountId,
                   direction: 'outgoing',
                   message_id: result?.key?.id,
                   sender: accountId,
-                  recipient: normalizedChatId,
+                  recipient: chatPhone,  // Phone number with country code
                   message: aiResponse,
                   timestamp: Date.now(),
                   type: 'text',
-                  chat_id: normalizedChatId,  // Use phone number for consistent lookups
+                  chat_id: chatPhone,  // Phone number for consistent lookups
                   is_group: isGroup,
                   status: 'success',
                   created_at: new Date().toISOString()
