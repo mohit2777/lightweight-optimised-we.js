@@ -612,8 +612,11 @@ function renderAccountsTable() {
         const description = account.description || '';
         const escapedDescription = description.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         
-        // Feature indicators
-        const defaultFeatures = { webhooks: { count: 0, active: 0 }, chatbot: { enabled: false } };
+        // Feature indicators with enhanced defaults
+        const defaultFeatures = { 
+            webhooks: { count: 0, active: 0, events: [] }, 
+            chatbot: { enabled: false, provider: null } 
+        };
         const features = {
             ...defaultFeatures,
             ...(account.features || {}),
@@ -623,6 +626,28 @@ function renderAccountsTable() {
 
         const hasActiveWebhooks = (features.webhooks.active || 0) > 0;
         const hasChatbot = !!features.chatbot.enabled;
+        const chatbotProvider = features.chatbot.provider;
+        
+        // Build webhook event badges
+        const webhookEvents = features.webhooks.events || [];
+        const hasMessages = webhookEvents.includes('message') || webhookEvents.includes('*') || webhookEvents.includes('all');
+        const hasAcks = webhookEvents.includes('message_ack') || webhookEvents.includes('*') || webhookEvents.includes('all');
+        const hasAllEvents = webhookEvents.includes('*') || webhookEvents.includes('all');
+        
+        // Build event type indicator HTML
+        let eventIndicators = '';
+        if (hasActiveWebhooks) {
+            if (hasAllEvents) {
+                eventIndicators = '<span class="event-badge all" title="All events"><i class="fas fa-asterisk"></i></span>';
+            } else {
+                if (hasMessages) {
+                    eventIndicators += '<span class="event-badge message" title="Messages"><i class="fas fa-comment"></i></span>';
+                }
+                if (hasAcks) {
+                    eventIndicators += '<span class="event-badge ack" title="Read receipts"><i class="fas fa-check-double"></i></span>';
+                }
+            }
+        }
         
         return `
         <tr>
@@ -635,12 +660,13 @@ function renderAccountsTable() {
                         <div style="font-weight: 600;">${account.name || 'Unnamed'}</div>
                         ${escapedDescription ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 3px; line-height: 1.4;">${escapedDescription}</div>` : ''}
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px;">${account.phone_number || 'Not connected'}</div>
-                        <div style="display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center;">
                             <span class="feature-badge ${hasActiveWebhooks ? 'active' : 'inactive'}" title="${features.webhooks.active}/${features.webhooks.count} webhooks active">
                                 <i class="fas fa-plug"></i> ${features.webhooks.count > 0 ? features.webhooks.active + '/' + features.webhooks.count : '0'}
                             </span>
-                            <span class="feature-badge ${hasChatbot ? 'active' : 'inactive'}" title="AI Chatbot ${hasChatbot ? 'enabled' : 'disabled'}">
-                                <i class="fas fa-robot"></i> ${hasChatbot ? 'ON' : 'OFF'}
+                            ${eventIndicators ? `<span class="event-badges">${eventIndicators}</span>` : ''}
+                            <span class="feature-badge ${hasChatbot ? 'active' : 'inactive'}" title="AI Chatbot ${hasChatbot ? 'enabled via ' + chatbotProvider : 'disabled'}">
+                                <i class="fas fa-robot"></i> ${hasChatbot ? (chatbotProvider || 'ON').toUpperCase().slice(0, 4) : 'OFF'}
                             </span>
                         </div>
                     </div>
@@ -1291,16 +1317,39 @@ function renderWebhooksList(accountId) {
         return;
     }
 
-    list.innerHTML = webhooks.map(webhook => `
+    list.innerHTML = webhooks.map(webhook => {
+        // Parse webhook events
+        const events = webhook.events || ['message'];
+        const hasAllEvents = events.includes('*') || events.includes('all');
+        const hasMessages = hasAllEvents || events.includes('message');
+        const hasAcks = hasAllEvents || events.includes('message_ack');
+        
+        // Build event badges
+        let eventBadgesHtml = '';
+        if (hasAllEvents) {
+            eventBadgesHtml = '<span class="event-badge all" style="margin-right: 4px;" title="All events"><i class="fas fa-asterisk"></i> All</span>';
+        } else {
+            if (hasMessages) {
+                eventBadgesHtml += '<span class="event-badge message" style="margin-right: 4px;" title="Incoming messages"><i class="fas fa-comment"></i> Messages</span>';
+            }
+            if (hasAcks) {
+                eventBadgesHtml += '<span class="event-badge ack" style="margin-right: 4px;" title="Delivery/read receipts"><i class="fas fa-check-double"></i> Receipts</span>';
+            }
+        }
+        
+        return `
         <div style="padding: 15px; background: rgba(255, 255, 255, 0.03); border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border-color);">
             <div style="display: flex; justify-content: space-between; align-items: start; gap: 15px;">
                 <div style="flex: 1;">
                     <div style="font-weight: 600; margin-bottom: 5px; word-break: break-all;">${webhook.url}</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
+                        ${eventBadgesHtml}
+                    </div>
                     ${webhook.secret ? `
                         <div style="font-size: 12px; color: var(--primary); margin-bottom: 3px;">
                             <i class="fas fa-key"></i> Secret: ${webhook.secret.substring(0, 10)}${'*'.repeat(Math.max(0, (webhook.secret.length || 10) - 10))}
                         </div>
-                    ` : ''}
+                    ` : '<div style="font-size: 11px; color: var(--warning); margin-bottom: 3px;"><i class="fas fa-exclamation-triangle"></i> No secret (recommended for security)</div>'}
                     <div style="font-size: 12px; color: var(--text-secondary);">
                         ${webhook.is_active ? '<span style="color: var(--success);"><i class="fas fa-check-circle"></i> Active</span>' : '<span style="color: var(--warning);"><i class="fas fa-pause-circle"></i> Inactive</span>'}
                         · Created: ${formatDate(webhook.created_at)}
@@ -1316,7 +1365,7 @@ function renderWebhooksList(accountId) {
                 </div>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 // Handle Create Webhook

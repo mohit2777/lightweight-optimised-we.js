@@ -338,19 +338,35 @@ app.get('/api/accounts', requireAuth, apiLimiter, async (req, res) => {
   try {
     const accounts = await db.getAccounts();
 
-    // Get webhooks for all accounts (simplified)
+    // Get webhooks for all accounts with event types
     let allWebhooks = [];
     try {
-      const result = await supabase.from('webhooks').select('account_id, is_active');
+      const result = await supabase.from('webhooks').select('account_id, is_active, events');
       allWebhooks = result.data || [];
     } catch (featureErr) {
       logger.warn('Could not fetch webhooks:', featureErr.message);
+    }
+
+    // Get AI configs for all accounts
+    let allAiConfigs = [];
+    try {
+      allAiConfigs = await db.getAllAiConfigs();
+    } catch (featureErr) {
+      logger.warn('Could not fetch AI configs:', featureErr.message);
     }
 
     // Enrich with real-time status from WhatsApp manager
     const enrichedAccounts = accounts.map(account => {
       const runtimeStatus = whatsappManager.getAccountStatus(account.id);
       const accountWebhooks = allWebhooks.filter(w => w.account_id === account.id);
+      const aiConfig = allAiConfigs.find(c => c.account_id === account.id);
+      
+      // Aggregate webhook event types
+      const eventTypes = new Set();
+      accountWebhooks.forEach(w => {
+        const events = w.events || ['message'];
+        events.forEach(e => eventTypes.add(e));
+      });
       
       return {
         ...account,
@@ -359,7 +375,12 @@ app.get('/api/accounts', requireAuth, apiLimiter, async (req, res) => {
         features: {
           webhooks: {
             count: accountWebhooks.length,
-            active: accountWebhooks.filter(w => w.is_active).length
+            active: accountWebhooks.filter(w => w.is_active).length,
+            events: Array.from(eventTypes) // ['message', 'message_ack', '*']
+          },
+          chatbot: {
+            enabled: aiConfig?.is_active || false,
+            provider: aiConfig?.provider || null
           }
         }
       };
@@ -521,17 +542,26 @@ app.get('/api/accounts/:id/webhooks', requireAuth, apiLimiter, async (req, res) 
 
 app.post('/api/accounts/:id/webhooks', requireAuth, webhookLimiter, async (req, res) => {
   try {
-    const { url, secret, is_active } = req.body;
+    const { url, secret, is_active, events } = req.body;
     const account_id = req.params.id;
 
     if (!url) {
       return res.status(400).json({ error: 'Webhook URL is required' });
     }
 
+    // Validate events array - default to 'message' if not provided
+    const validEvents = ['message', 'message_ack', '*', 'all'];
+    const webhookEvents = Array.isArray(events) ? events.filter(e => validEvents.includes(e)) : ['message'];
+    
+    if (webhookEvents.length === 0) {
+      webhookEvents.push('message'); // Default fallback
+    }
+
     const webhookData = {
       id: require('uuid').v4(),
       account_id,
       url,
+      events: webhookEvents,
       secret: secret || null,
       is_active: is_active !== false,
       created_at: new Date().toISOString()
@@ -635,12 +665,18 @@ app.post('/api/accounts/:accountId/webhooks/:webhookId/test', requireAuth, apiLi
 
 app.post('/api/webhooks', requireAuth, webhookLimiter, validate(schemas.createWebhook), async (req, res) => {
   try {
-    const { account_id, url, secret, is_active } = req.body;
+    const { account_id, url, secret, is_active, events } = req.body;
+
+    // Validate events array
+    const validEvents = ['message', 'message_ack', '*', 'all'];
+    const webhookEvents = Array.isArray(events) ? events.filter(e => validEvents.includes(e)) : ['message'];
+    if (webhookEvents.length === 0) webhookEvents.push('message');
 
     const webhookData = {
       id: require('uuid').v4(),
       account_id,
       url,
+      events: webhookEvents,
       secret: secret || '',
       is_active: is_active !== false,
       created_at: new Date().toISOString()

@@ -710,6 +710,63 @@ canvas {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+/* Event Type Badges - Show webhook subscription types */
+.event-badges {
+    display: inline-flex;
+    gap: 3px;
+    align-items: center;
+}
+
+.event-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+}
+
+.event-badge.message {
+    background: rgba(33, 150, 243, 0.15);
+    color: #2196F3;
+    border: 1px solid rgba(33, 150, 243, 0.3);
+}
+
+.event-badge.ack {
+    background: rgba(156, 39, 176, 0.15);
+    color: #9C27B0;
+    border: 1px solid rgba(156, 39, 176, 0.3);
+}
+
+.event-badge.all {
+    background: rgba(255, 193, 7, 0.15);
+    color: #FFC107;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.event-badge i {
+    font-size: 8px;
+}
+
+/* Required Field Indicator */
+.required-indicator {
+    color: var(--danger);
+    font-weight: bold;
+    margin-left: 2px;
+}
+
+.recommended-indicator {
+    color: var(--warning);
+    font-size: 10px;
+    font-weight: normal;
+    margin-left: 4px;
+    opacity: 0.8;
+}
+
 /* Action Buttons */
 .action-buttons {
     display: flex;

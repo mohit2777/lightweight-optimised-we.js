@@ -486,36 +486,41 @@
                 <div class="modal-body">
                     <input type="hidden" id="newWebhookAccountId">
                     <div class="form-group">
-                        <label>Webhook URL</label>
+                        <label>Webhook URL <span class="required-indicator">*</span></label>
                         <input type="url" class="cyber-input" id="webhookUrl" placeholder="https://your-n8n.com/webhook/xxx" required>
+                        <small style="color: var(--text-secondary); font-size: 11px;">The URL that will receive POST requests with message data</small>
                     </div>
                     <div class="form-group">
-                        <label>Events</label>
-                        <div class="checkbox-group">
-                            <label class="checkbox-label">
+                        <label>Events <span class="required-indicator">*</span></label>
+                        <div class="checkbox-group" style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                 <input type="checkbox" id="eventMessage" value="message" checked>
-                                <span>📨 Incoming Messages</span>
+                                <span class="event-badge message" style="padding: 4px 10px;"><i class="fas fa-comment"></i> Messages</span>
+                                <span style="font-size: 11px; color: var(--text-secondary);">Incoming WhatsApp messages</span>
                             </label>
-                            <label class="checkbox-label">
+                            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                 <input type="checkbox" id="eventMessageAck" value="message_ack">
-                                <span>✅ Read Receipts (sent/delivered/read)</span>
+                                <span class="event-badge ack" style="padding: 4px 10px;"><i class="fas fa-check-double"></i> Receipts</span>
+                                <span style="font-size: 11px; color: var(--text-secondary);">Sent/Delivered/Read status updates</span>
                             </label>
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>Secret (Optional)</label>
-                        <input type="text" class="cyber-input" id="webhookSecret" placeholder="Signing secret for HMAC">
+                        <label>Secret <span class="recommended-indicator">(Recommended)</span></label>
+                        <input type="text" class="cyber-input" id="webhookSecret" placeholder="Signing secret for HMAC verification">
+                        <small style="color: var(--text-secondary); font-size: 11px;">Used to sign payloads with HMAC-SHA256 for security verification</small>
                     </div>
                     <div class="form-group">
-                        <label class="checkbox-label">
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                             <input type="checkbox" id="webhookActive" checked>
                             <span>Active</span>
+                            <span style="font-size: 11px; color: var(--text-secondary);">Webhook will start receiving events immediately</span>
                         </label>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary modal-close">Cancel</button>
-                    <button type="submit" class="btn-cyber">Add Webhook</button>
+                    <button type="submit" class="btn-cyber"><i class="fas fa-plus"></i> Add Webhook</button>
                 </div>
             </form>
         </div>
