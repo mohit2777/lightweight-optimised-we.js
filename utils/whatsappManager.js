@@ -254,6 +254,25 @@ class WhatsAppManager {
 
     // Cleanup disconnected accounts (every 5 minutes)
     setInterval(() => this.cleanupDisconnectedAccounts(), 300000);
+    
+    // Periodic session save (every 2 minutes) - ensures Signal keys are persisted
+    setInterval(() => this.saveAllSessions(), 120000);
+  }
+  
+  // Save all active sessions to database
+  async saveAllSessions() {
+    for (const [accountId, status] of this.accountStatus) {
+      if (status === 'ready') {
+        const authState = this.authStates.get(accountId);
+        if (authState?.saveAllToDatabase) {
+          try {
+            await authState.saveAllToDatabase();
+          } catch (err) {
+            logger.warn(`Failed to save session for ${accountId}:`, err.message);
+          }
+        }
+      }
+    }
   }
 
   setSocketIO(io) {
@@ -615,8 +634,14 @@ class WhatsAppManager {
       for (const message of messages) {
         try {
           await this.handleIncomingMessage(sock, accountId, message);
+          
+          // Save session after handling message (keys may have been updated)
+          const authState = this.authStates.get(accountId);
+          if (authState?.saveAllToDatabase) {
+            authState.saveAllToDatabase().catch(() => {});
+          }
         } catch (error) {
-          logger.error(`Message handler error for ${accountId}:`, error);
+          logger.error(`Message handler error for ${accountId}:`, error);, error);
         }
       }
     });
@@ -879,7 +904,12 @@ class WhatsAppManager {
         // Clean up old entries after 5 minutes
         setTimeout(() => sock.messageRetryMap?.delete(result.key.id), 5 * 60 * 1000);
       }
-      // Note: Session keys are saved via creds.update event when they change
+      
+      // CRITICAL: Save session after sending message - new Signal keys may have been created
+      const authState = this.authStates.get(accountId);
+      if (authState?.saveAllToDatabase) {
+        authState.saveAllToDatabase().catch(() => {});
+      }
 
       await db.updateAccount(accountId, {
         last_active_at: new Date().toISOString()
@@ -961,6 +991,12 @@ class WhatsAppManager {
     }
 
     const result = await sock.sendMessage(jid, messageContent);
+
+    // Save session after media send (may create new sender keys)
+    const authState = this.authStates.get(accountId);
+    if (authState?.saveAllToDatabase) {
+      authState.saveAllToDatabase().catch(() => {});
+    }
 
     this.metrics.messagesProcessed++;
 
