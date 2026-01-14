@@ -578,17 +578,32 @@ class WhatsAppManager {
 
           if (aiResponse) {
             logger.info(`[Chatbot] AI generated response: "${aiResponse.slice(0, 100)}..."`);
-            // Use the same sendMessage method as dashboard (with proper typing & encryption)
-            // Extract phone number from sender JID
-            const phoneNumber = sender.split('@')[0];
+            
+            // Use the original sender JID directly (preserves exact format)
+            // For direct messages: use remoteJid, for groups: use participant
+            const replyJid = isGroup ? sender : message.key.remoteJid;
             
             try {
               // Reduce typing delay for faster response (500ms instead of 1500ms default)
               const originalTypingDelay = process.env.TYPING_DELAY_MS;
               process.env.TYPING_DELAY_MS = '500';
               
-              logger.info(`[Chatbot] Sending response to ${phoneNumber}...`);
-              const result = await this.sendMessage(accountId, phoneNumber, aiResponse);
+              logger.info(`[Chatbot] Sending response to JID: ${replyJid}...`);
+              
+              // Send directly using sock.sendMessage with the exact JID
+              const sock = this.clients.get(accountId);
+              if (sock) {
+                // Show typing
+                try {
+                  await sock.presenceSubscribe(replyJid);
+                  await sock.sendPresenceUpdate('composing', replyJid);
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                  await sock.sendPresenceUpdate('paused', replyJid);
+                } catch {}
+                
+                const result = await sock.sendMessage(replyJid, { text: aiResponse });
+                logger.info(`[Chatbot] ✅ Response sent to ${replyJid.split('@')[0]} (msgId: ${result?.key?.id?.slice(0, 10)}...)`);
+              }
               
               // Restore original typing delay
               if (originalTypingDelay !== undefined) {
@@ -596,8 +611,6 @@ class WhatsAppManager {
               } else {
                 delete process.env.TYPING_DELAY_MS;
               }
-              
-              logger.info(`[Chatbot] ✅ Response sent to ${phoneNumber} (msgId: ${result.messageId?.slice(0, 10)}...)`);
             } catch (sendError) {
               logger.error(`[Chatbot] ❌ Failed to send response: ${sendError.message}`);
             }
