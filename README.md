@@ -3,6 +3,7 @@
 > **A self-hosted WhatsApp Business API alternative** - Manage multiple WhatsApp accounts, automate messages with AI-powered chatbots, and integrate with any system via webhooks. Runs 100% free on Render + Supabase.
 
 ## 📱 What is this?
+<img width="1536" height="1024" alt="best" src="https://github.com/user-attachments/assets/ff8e1643-9a1d-4d1d-90bb-853cb605001d" />
 
 This is a **lightweight WhatsApp automation platform** that lets you:
 
