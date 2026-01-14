@@ -136,27 +136,29 @@ class MessageQueue {
     const batch = this.queue.splice(0, this.batchSize);
     this.lastFlush = Date.now();
 
+    // Valid columns in message_logs table
+    const validColumns = ['account_id', 'webhook_id', 'direction', 'message_id', 'sender', 
+      'recipient', 'message', 'media', 'timestamp', 'type', 'chat_id', 'is_group', 
+      'group_name', 'status', 'error_message', 'created_at'];
+    
+    // Sanitize batch: only keep valid columns
+    const sanitizedBatch = batch.map(m => {
+      const clean = {};
+      for (const col of validColumns) {
+        if (m[col] !== undefined) clean[col] = m[col];
+      }
+      return clean;
+    });
+
     try {
       let { error } = await supabase
         .from('message_logs')
-        .insert(batch);
+        .insert(sanitizedBatch);
 
-      // Handle unknown column errors gracefully
+      // Handle unknown column errors gracefully (shouldn't happen with whitelist, but just in case)
       if (error && error.code === 'PGRST204') {
-        const unknownColMatch = error.message?.match(/'([^']+)' column/);
-        const unknownCol = unknownColMatch ? unknownColMatch[1] : null;
-
-        if (unknownCol) {
-          logger.warn(`Retrying batch insert without unknown column: ${unknownCol}`);
-          const sanitized = batch.map(m => {
-            const copy = { ...m };
-            delete copy[unknownCol];
-            return copy;
-          });
-
-          const retry = await supabase.from('message_logs').insert(sanitized);
-          error = retry.error;
-        }
+        logger.warn(`Unknown column error (schema mismatch): ${error.message}`);
+        // Already sanitized, so just log the error
       }
 
       if (error) {
@@ -723,11 +725,15 @@ const db = {
     }
     
     try {
+      // Normalize contact ID - could be '919876543210' or '919876543210@s.whatsapp.net'
+      const normalizedId = contactId.includes('@') ? contactId : `${contactId}@s.whatsapp.net`;
+      
+      // Query using chat_id which is consistently the full JID
       const { data, error } = await supabase
         .from('message_logs')
         .select('direction, message, created_at')
         .eq('account_id', accountId)
-        .or(`sender.eq.${contactId},recipient.eq.${contactId}`)
+        .eq('chat_id', normalizedId)
         .order('created_at', { ascending: false })
         .limit(limit);
 
