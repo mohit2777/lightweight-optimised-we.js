@@ -584,20 +584,6 @@ class WhatsAppManager {
       const messageContent = message.message;
       if (!messageContent) return;
 
-      // DEBUG: Log full message structure to find phone number
-      logger.info(`[DEBUG] Message keys: ${JSON.stringify(Object.keys(message))}`);
-      if (message.verifiedBizName) logger.info(`[DEBUG] verifiedBizName: ${message.verifiedBizName}`);
-      if (message.pushName) logger.info(`[DEBUG] pushName: ${message.pushName}`);
-      if (message.participant) logger.info(`[DEBUG] participant: ${message.participant}`);
-      if (message.messageStubParameters) logger.info(`[DEBUG] messageStubParameters: ${JSON.stringify(message.messageStubParameters)}`);
-      
-      // Log the full message for analysis (limited)
-      const debugMsg = JSON.stringify(message, (key, value) => {
-        if (key === 'message') return '[content]';
-        return value;
-      }).slice(0, 500);
-      logger.info(`[DEBUG] Full message: ${debugMsg}`);
-
       // Extract message text
       let messageText = '';
       if (messageContent.conversation) {
@@ -610,12 +596,25 @@ class WhatsAppManager {
         messageText = messageContent.videoMessage.caption;
       }
 
-      // Get sender JID (original format - could be @lid or @s.whatsapp.net)
+      // Get sender info - prefer senderPn (actual phone) over remoteJid (could be @lid)
       const senderJid = message.key.participant || message.key.remoteJid;
       const chatJid = message.key.remoteJid;
       
-      // Get actual phone number with country code (e.g., "918949171377")
-      const senderPhone = getPhoneNumber(senderJid);
+      // Extract actual phone number from senderPn field (contains real phone for @lid contacts)
+      // Format: "918005780278@s.whatsapp.net" -> "918005780278"
+      let senderPhone;
+      if (message.key.senderPn) {
+        // senderPn contains the real phone number!
+        senderPhone = message.key.senderPn.split('@')[0];
+        // Cache the LID to phone mapping for future use
+        if (chatJid.endsWith('@lid')) {
+          storeLidPhoneMapping(chatJid, senderPhone);
+        }
+      } else {
+        senderPhone = getPhoneNumber(senderJid);
+      }
+      
+      // For chat_id, use cached phone if available
       const chatPhone = getPhoneNumber(chatJid);
       
       // Log with actual phone number
