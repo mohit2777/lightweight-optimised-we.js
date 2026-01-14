@@ -36,7 +36,7 @@ Before starting, make sure you have:
 
 ## 📦 Step 1: Fork the Repository
 
-1. Go to the repository: **https://github.com/mohit2777/lightweight-optimised-we.js**
+1. Go to the repository: **[github.com/mohit2777/whatsapp-api-free](https://github.com/mohit2777/whatsapp-api-free)**
 
 2. Click the **"Fork"** button (top right)
 
