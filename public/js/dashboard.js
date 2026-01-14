@@ -638,13 +638,13 @@ function renderAccountsTable() {
         let eventIndicators = '';
         if (hasActiveWebhooks) {
             if (hasAllEvents) {
-                eventIndicators = '<span class="event-badge all" title="All events"><i class="fas fa-asterisk"></i></span>';
+                eventIndicators = '<span class="event-badge all" title="All events (incoming + seen/delivered)"><i class="fas fa-asterisk"></i></span>';
             } else {
                 if (hasMessages) {
-                    eventIndicators += '<span class="event-badge message" title="Messages"><i class="fas fa-comment"></i></span>';
+                    eventIndicators += '<span class="event-badge message" title="Incoming messages"><i class="fas fa-envelope"></i></span>';
                 }
                 if (hasAcks) {
-                    eventIndicators += '<span class="event-badge ack" title="Read receipts"><i class="fas fa-check-double"></i></span>';
+                    eventIndicators += '<span class="event-badge ack" title="Seen/Delivered status"><i class="fas fa-eye"></i></span>';
                 }
             }
         }
@@ -1324,16 +1324,16 @@ function renderWebhooksList(accountId) {
         const hasMessages = hasAllEvents || events.includes('message');
         const hasAcks = hasAllEvents || events.includes('message_ack');
         
-        // Build event badges
+        // Build event badges with clear descriptions
         let eventBadgesHtml = '';
         if (hasAllEvents) {
-            eventBadgesHtml = '<span class="event-badge all" style="margin-right: 4px;" title="All events"><i class="fas fa-asterisk"></i> All</span>';
+            eventBadgesHtml = '<span class="event-badge all" style="margin-right: 4px;" title="Incoming messages + Sent/Delivered/Read status"><i class="fas fa-asterisk"></i> All Events</span>';
         } else {
             if (hasMessages) {
-                eventBadgesHtml += '<span class="event-badge message" style="margin-right: 4px;" title="Incoming messages"><i class="fas fa-comment"></i> Messages</span>';
+                eventBadgesHtml += '<span class="event-badge message" style="margin-right: 4px;" title="Receive notifications when someone sends you a message"><i class="fas fa-envelope"></i> Incoming</span>';
             }
             if (hasAcks) {
-                eventBadgesHtml += '<span class="event-badge ack" style="margin-right: 4px;" title="Delivery/read receipts"><i class="fas fa-check-double"></i> Receipts</span>';
+                eventBadgesHtml += '<span class="event-badge ack" style="margin-right: 4px;" title="Sent ✓ / Delivered ✓✓ / Read (blue ✓✓) status updates"><i class="fas fa-check-double"></i> Seen/Delivered</span>';
             }
         }
         
