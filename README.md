@@ -1,6 +1,39 @@
 # WhatsApp Multi-Automation API
 
-Multi-account WhatsApp automation using **Baileys** - No Chromium/Puppeteer required.
+> **A self-hosted WhatsApp Business API alternative** - Manage multiple WhatsApp accounts, automate messages with AI-powered chatbots, and integrate with any system via webhooks. Runs 100% free on Render + Supabase.
+
+## 📱 What is this?
+
+This is a **lightweight WhatsApp automation platform** that lets you:
+
+- **Connect multiple WhatsApp accounts** - Manage all your business numbers from one dashboard
+- **AI-Powered Chatbots** - Automatic replies using Claude, GPT-4, Gemini, or Groq with conversation memory
+- **Webhook Integrations** - Send incoming messages to your CRM, ticketing system, or any API
+- **Send Messages via API** - Integrate WhatsApp messaging into your apps and workflows
+- **Visual Flow Builder** - Create automated conversation flows without coding
+- **No Browser Required** - Uses Baileys (WebSocket) instead of Puppeteer, runs on 512MB RAM
+
+### 💡 Use Cases
+
+| Industry | Use Case |
+|----------|----------|
+| **E-commerce** | Order confirmations, shipping updates, abandoned cart recovery |
+| **Customer Support** | AI chatbot for FAQs, ticket creation via webhook |
+| **Marketing** | Broadcast campaigns, lead capture bots |
+| **Healthcare** | Appointment reminders, patient follow-ups |
+| **Education** | Class notifications, assignment reminders |
+
+### 🆚 vs Official WhatsApp Business API
+
+| Feature | Official API | This Platform |
+|---------|-------------|---------------|
+| Cost | $50-200+/month | **$0/month** |
+| Setup | Meta approval process | Scan QR, done |
+| Messages | Pay per conversation | Unlimited |
+| AI Chatbot | Not included | ✅ Built-in |
+| Self-hosted | No | ✅ Yes |
+
+---
 
 ## 🚀 Quick Deploy (Free)
 

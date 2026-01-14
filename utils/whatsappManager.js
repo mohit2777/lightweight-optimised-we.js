@@ -236,6 +236,7 @@ class WhatsAppManager {
     this.reconnecting = new Set();
     this.deletedAccounts = new Set(); // Track deleted accounts to prevent QR regeneration
     this.qrAttempts = new Map();
+    this.reconnectAttempts = new Map(); // accountId -> { count, lastAttempt }
     this.isShuttingDown = false;
     this.io = null;
     this.authStates = new Map();    // accountId -> { state, saveCreds }
@@ -451,6 +452,7 @@ class WhatsAppManager {
         this.accountStatus.set(accountId, 'ready');
         this.qrCodes.delete(accountId);
         this.reconnecting.delete(accountId);
+        this.reconnectAttempts.delete(accountId); // Reset backoff on successful connection
 
         // CRITICAL: Save ALL session files after connection is established
         // This ensures Signal protocol keys are saved before any messages are sent
@@ -477,6 +479,9 @@ class WhatsAppManager {
 
         // Handle different disconnect reasons
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        
+        // Special handling for connectionReplaced (440) - another device connected
+        const isConnectionReplaced = statusCode === 440 || statusCode === DisconnectReason.connectionReplaced;
 
         if (statusCode === DisconnectReason.loggedOut) {
           // User logged out - clear session
@@ -488,9 +493,53 @@ class WhatsAppManager {
           });
           this.accountStatus.set(accountId, 'logged_out');
           this.clients.delete(accountId);
+          this.reconnectAttempts.delete(accountId); // Reset attempts
+        } else if (isConnectionReplaced) {
+          // connectionReplaced - another instance/device took over
+          // Use exponential backoff to prevent reconnection loops
+          const attempts = this.reconnectAttempts.get(accountId) || { count: 0, lastAttempt: 0 };
+          const now = Date.now();
+          
+          // Reset attempts if last attempt was more than 5 minutes ago
+          if (now - attempts.lastAttempt > 300000) {
+            attempts.count = 0;
+          }
+          
+          attempts.count++;
+          attempts.lastAttempt = now;
+          this.reconnectAttempts.set(accountId, attempts);
+          
+          // Exponential backoff: 10s, 30s, 60s, 120s, max 5 minutes
+          const backoffMs = Math.min(10000 * Math.pow(2, attempts.count - 1), 300000);
+          
+          if (attempts.count > 5) {
+            // Too many connectionReplaced errors - stop reconnecting
+            logger.error(`Connection replaced too many times for ${accountId}. Check if WhatsApp Web is open elsewhere.`);
+            await db.updateAccount(accountId, {
+              status: 'disconnected',
+              error_message: 'Connection replaced - WhatsApp may be open on another device/browser',
+              updated_at: new Date().toISOString()
+            }).catch(() => {});
+            this.accountStatus.set(accountId, 'disconnected');
+            this.clients.delete(accountId);
+          } else {
+            logger.info(`Connection replaced for ${accountId}. Waiting ${backoffMs/1000}s before attempt ${attempts.count}/5...`);
+            this.accountStatus.set(accountId, 'reconnecting');
+            
+            setTimeout(async () => {
+              if (!this.isShuttingDown && !this.deletedAccounts.has(accountId)) {
+                try {
+                  await this.startBaileysClient(accountId);
+                } catch (err) {
+                  logger.error(`Reconnect failed for ${accountId}:`, err.message);
+                }
+              }
+            }, backoffMs);
+          }
         } else if (shouldReconnect && !this.isShuttingDown) {
-          // Try to reconnect (unless account was deleted)
+          // Normal disconnect - try to reconnect after 3 seconds
           this.accountStatus.set(accountId, 'reconnecting');
+          this.reconnectAttempts.delete(accountId); // Reset for normal reconnects
           
           setTimeout(async () => {
             // Don't reconnect if account was deleted or shutting down
