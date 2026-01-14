@@ -51,12 +51,6 @@
                     <span class="nav-text">Analytics</span>
                     <span class="nav-indicator"></span>
                 </a>
-                <a href="#" class="nav-link" data-view="flows">
-                    <span class="nav-icon"><i class="fas fa-project-diagram"></i></span>
-                    <span class="nav-text">Flow Builder</span>
-                    <span class="nav-indicator"></span>
-                    <span class="nav-badge">AI</span>
-                </a>
                 <a href="#" class="nav-link" data-view="system">
                     <span class="nav-icon"><i class="fas fa-server"></i></span>
                     <span class="nav-text">System</span>
@@ -296,60 +290,6 @@
                     </div>
                 </div>
 
-                <!-- Flows View (Hidden by default) -->
-                <div id="flowsView" style="display: none;">
-                    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
-                        <div class="stat-card cyber-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-project-diagram"></i>
-                            </div>
-                            <div class="stat-details">
-                                <div class="stat-value" id="totalFlowsStat">0</div>
-                                <div class="stat-label">Total Flows</div>
-                            </div>
-                        </div>
-                        <div class="stat-card cyber-card">
-                            <div class="stat-icon active">
-                                <i class="fas fa-check-circle"></i>
-                            </div>
-                            <div class="stat-details">
-                                <div class="stat-value" id="activeFlowsStat">0</div>
-                                <div class="stat-label">Active Flows</div>
-                            </div>
-                        </div>
-                        <div class="stat-card cyber-card">
-                            <div class="stat-icon messages">
-                                <i class="fas fa-users"></i>
-                            </div>
-                            <div class="stat-details">
-                                <div class="stat-value" id="flowAccountsStat">0</div>
-                                <div class="stat-label">Accounts with Flows</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="cyber-card">
-                        <div class="card-header">
-                            <div>
-                                <h2 class="card-title">All Flows</h2>
-                                <p class="card-subtitle">AI-powered automation flows across all accounts</p>
-                            </div>
-                            <a href="/flow-builder" class="btn-cyber">
-                                <span class="btn-content">
-                                    <i class="fas fa-plus"></i> Create New Flow
-                                </span>
-                            </a>
-                        </div>
-                        <div id="flowsListContainer" style="padding: 20px;">
-                            <div class="loading-spinner" id="flowsLoading" style="text-align: center; padding: 40px;">
-                                <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary);"></i>
-                                <p style="margin-top: 10px; color: var(--text-secondary);">Loading flows...</p>
-                            </div>
-                            <div id="flowsList" style="display: none;"></div>
-                        </div>
-                    </div>
-                </div>
-
             </div>
         </main>
     </div>
@@ -547,11 +487,24 @@
                     <input type="hidden" id="newWebhookAccountId">
                     <div class="form-group">
                         <label>Webhook URL</label>
-                        <input type="url" class="cyber-input" id="webhookUrl" placeholder="https://your-api.com/webhook" required>
+                        <input type="url" class="cyber-input" id="webhookUrl" placeholder="https://your-n8n.com/webhook/xxx" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Events</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="eventMessage" value="message" checked>
+                                <span>📨 Incoming Messages</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="eventMessageAck" value="message_ack">
+                                <span>✅ Read Receipts (sent/delivered/read)</span>
+                            </label>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Secret (Optional)</label>
-                        <input type="text" class="cyber-input" id="webhookSecret" placeholder="Signing secret">
+                        <input type="text" class="cyber-input" id="webhookSecret" placeholder="Signing secret for HMAC">
                     </div>
                     <div class="form-group">
                         <label class="checkbox-label">

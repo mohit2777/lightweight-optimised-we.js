@@ -235,7 +235,7 @@ const db = {
   async createAccount(accountData) {
     try {
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .insert([accountData])
         .select();
 
@@ -268,7 +268,7 @@ const db = {
     return withRetry(async () => {
       // Explicitly select columns WITHOUT session_data (which is huge - 1-5MB each)
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .select('id, name, description, phone_number, status, created_at, updated_at')
         .order('created_at', { ascending: false });
 
@@ -297,7 +297,7 @@ const db = {
     try {
       // Exclude session_data to avoid huge payloads
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .select('id, name, description, phone_number, status, created_at, updated_at')
         .eq('id', id)
         .single();
@@ -320,7 +320,7 @@ const db = {
   async updateAccount(id, updates) {
     return withRetry(async () => {
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .update(updates)
         .eq('id', id)
         .select();
@@ -344,7 +344,7 @@ const db = {
   async deleteAccount(id) {
     try {
       const { error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .delete()
         .eq('id', id);
 
@@ -373,7 +373,7 @@ const db = {
   async getSessionData(accountId) {
     try {
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .select('session_data')
         .eq('id', accountId)
         .single();
@@ -389,7 +389,7 @@ const db = {
   async saveSessionData(accountId, sessionData) {
     try {
       const { error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .update({
           session_data: sessionData,
           last_session_saved: new Date().toISOString()
@@ -407,7 +407,7 @@ const db = {
   async clearSessionData(accountId) {
     try {
       const { error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .update({
           session_data: null,
           last_session_saved: null
@@ -879,7 +879,7 @@ const db = {
   async saveSessionData(accountId, sessionData) {
     return withRetry(async () => {
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .update({
           session_data: sessionData,
           last_session_saved: new Date().toISOString(),
@@ -894,7 +894,6 @@ const db = {
       cacheManager.invalidate(`account_${accountId}`);
       cacheManager.invalidatePattern('^accounts');
 
-      logger.info(`Session data saved for account: ${accountId}`);
       return data[0];
     }, `saveSessionData(${accountId})`);
   },
@@ -907,7 +906,7 @@ const db = {
   async getSessionData(accountId) {
     return withRetry(async () => {
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .select('session_data')
         .eq('id', accountId)
         .single();
@@ -928,7 +927,7 @@ const db = {
   async clearSessionData(accountId) {
     try {
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .update({
           session_data: null,
           last_session_saved: null,
@@ -960,7 +959,7 @@ const db = {
   async hasSessionData(accountId) {
     return withRetry(async () => {
       const { data, error } = await supabase
-        .from('whatsapp_accounts')
+        .from('accounts')
         .select('session_data, last_session_saved')
         .eq('id', accountId)
         .single();

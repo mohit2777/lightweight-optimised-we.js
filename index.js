@@ -435,7 +435,7 @@ app.get('/api/accounts/:id/qr', requireAuth, apiLimiter, async (req, res) => {
     const qrCode = whatsappManager.getQRCode(accountId);
 
     if (qrCode) {
-      return res.json({ qr_code: qrCode });
+      return res.json({ qr_code: qrCode, status: 'qr_ready' });
     }
 
     const runtimeStatus = whatsappManager.getAccountStatus(accountId);
@@ -444,13 +444,12 @@ app.get('/api/accounts/:id/qr', requireAuth, apiLimiter, async (req, res) => {
       return res.json({ status: 'ready' });
     }
 
-    // Return current status without forcing a new QR
-    // Use POST /api/accounts/:id/request-qr to explicitly request a new QR
+    // Trigger QR generation if none exists
+    const ensured = await whatsappManager.ensureQRCode(accountId);
+
     return res.status(202).json({ 
-      status: runtimeStatus || 'disconnected',
-      message: runtimeStatus === 'initializing' 
-        ? 'QR code is being generated, please wait...' 
-        : 'Use "Request New QR" button to generate a QR code'
+      status: ensured?.status || runtimeStatus || 'initializing',
+      message: 'QR code generation started, please wait...'
     });
   } catch (error) {
     logger.error(`Error fetching QR code for ${accountId}:`, error);
@@ -716,6 +715,110 @@ app.get('/api/accounts/:id/webhook-secrets', requireAuth, apiLimiter, async (req
   } catch (error) {
     logger.error(`Error fetching webhook secrets for ${req.params.id}:`, error);
     res.status(500).json({ error: 'Failed to fetch webhook secrets' });
+  }
+});
+
+// ============================================================================
+// CHATBOT API
+// ============================================================================
+
+const chatbotManager = require('./utils/chatbot');
+
+// Get chatbot configuration for an account
+app.get('/api/accounts/:id/chatbot', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const config = await db.getChatbotConfig(req.params.id);
+    if (!config) {
+      // Return empty config if none exists
+      return res.json({});
+    }
+    res.json(config);
+  } catch (error) {
+    logger.error(`Error fetching chatbot config for ${req.params.id}:`, error);
+    res.status(500).json({ error: 'Failed to fetch chatbot configuration' });
+  }
+});
+
+// Save chatbot configuration for an account
+app.post('/api/accounts/:id/chatbot', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const accountId = req.params.id;
+    const { provider, model, api_key, system_prompt, temperature, is_active, history_limit } = req.body;
+
+    // Validate required fields if enabling
+    if (is_active && !api_key) {
+      return res.status(400).json({ error: 'API Key is required to enable chatbot' });
+    }
+
+    const configData = {
+      account_id: accountId,
+      provider: provider || 'gemini',
+      model: model || '',
+      api_key: api_key || '',
+      system_prompt: system_prompt || 'You are a helpful assistant.',
+      temperature: temperature !== undefined ? temperature : 0.7,
+      is_active: is_active || false,
+      history_limit: history_limit || 10
+    };
+
+    const savedConfig = await db.saveAiConfig(configData);
+    
+    logger.info(`Chatbot config saved for account ${accountId}`);
+    res.json(savedConfig || configData);
+  } catch (error) {
+    logger.error(`Error saving chatbot config for ${req.params.id}:`, error);
+    res.status(500).json({ error: 'Failed to save chatbot configuration', message: error.message });
+  }
+});
+
+// Test chatbot configuration
+app.post('/api/accounts/:id/chatbot/test', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const { provider, model, api_key, system_prompt, temperature, message } = req.body;
+
+    if (!api_key) {
+      return res.status(400).json({ error: 'API Key is required for testing' });
+    }
+
+    if (!provider) {
+      return res.status(400).json({ error: 'Provider is required' });
+    }
+
+    const testConfig = {
+      provider,
+      model: model || '',
+      api_key,
+      system_prompt: system_prompt || 'You are a helpful assistant.',
+      temperature: temperature !== undefined ? temperature : 0.7
+    };
+
+    const testMessage = message || 'Hello, this is a test message.';
+    
+    const response = await chatbotManager.testConfig(testConfig, testMessage);
+    
+    res.json({ 
+      success: true, 
+      response,
+      provider,
+      model
+    });
+  } catch (error) {
+    logger.error(`Error testing chatbot for ${req.params.id}:`, error);
+    res.status(500).json({ 
+      error: 'Chatbot test failed', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete chatbot configuration
+app.delete('/api/accounts/:id/chatbot', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    await db.deleteAiConfig(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    logger.error(`Error deleting chatbot config for ${req.params.id}:`, error);
+    res.status(500).json({ error: 'Failed to delete chatbot configuration' });
   }
 });
 
@@ -1365,6 +1468,41 @@ app.get('/ready', async (req, res) => {
   }
 });
 
+// Get system logs
+app.get('/api/logs', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const logFile = path.join(__dirname, 'logs', 'combined.log');
+
+    // Check if file exists
+    try {
+      await fs.access(logFile);
+    } catch (error) {
+      return res.json({ logs: ['No logs available yet.'] });
+    }
+
+    // Read file
+    const content = await fs.readFile(logFile, 'utf8');
+    const lines = content.trim().split('\n');
+
+    // Get last 100 lines
+    const recentLogs = lines.slice(-100).reverse();
+
+    // Parse JSON logs if possible
+    const parsedLogs = recentLogs.map(line => {
+      try {
+        return JSON.parse(line);
+      } catch (e) {
+        return { message: line, timestamp: new Date().toISOString() };
+      }
+    });
+
+    res.json({ logs: parsedLogs });
+  } catch (error) {
+    logger.error('Error reading logs:', error);
+    res.status(500).json({ error: 'Failed to read logs' });
+  }
+});
+
 // ============================================================================
 // ERROR HANDLING
 // ============================================================================
@@ -1587,41 +1725,6 @@ process.on('unhandledRejection', (reason, promise) => {
   }
   
   logger.error('Unhandled rejection at:', promise, 'reason:', reason);
-});
-
-// Get system logs
-app.get('/api/logs', requireAuth, apiLimiter, async (req, res) => {
-  try {
-    const logFile = path.join(__dirname, 'logs', 'combined.log');
-
-    // Check if file exists
-    try {
-      await fs.access(logFile);
-    } catch (error) {
-      return res.json({ logs: ['No logs available yet.'] });
-    }
-
-    // Read file
-    const content = await fs.readFile(logFile, 'utf8');
-    const lines = content.trim().split('\n');
-
-    // Get last 100 lines
-    const recentLogs = lines.slice(-100).reverse();
-
-    // Parse JSON logs if possible
-    const parsedLogs = recentLogs.map(line => {
-      try {
-        return JSON.parse(line);
-      } catch (e) {
-        return { message: line, timestamp: new Date().toISOString() };
-      }
-    });
-
-    res.json({ logs: parsedLogs });
-  } catch (error) {
-    logger.error('Error reading logs:', error);
-    res.status(500).json({ error: 'Failed to read logs' });
-  }
 });
 
 module.exports = { app, server, io, emitToAll, emitToAccount };

@@ -145,7 +145,6 @@ function setupEventListeners() {
                 'webhooks': 'Webhooks',
                 'messages': 'Messages',
                 'analytics': 'Analytics',
-                'flows': 'Flow Builder',
                 'system': 'System'
             };
             if (pageTitle) {
@@ -173,7 +172,6 @@ function setupEventListeners() {
             const statsGrid = document.getElementById('statsGrid');
             const analyticsView = document.getElementById('analyticsView');
             const systemView = document.getElementById('systemView');
-            const flowsView = document.getElementById('flowsView');
             
             if (!statsGrid) {
                 // Content was replaced, need to reload page or restore
@@ -189,7 +187,6 @@ function setupEventListeners() {
             if (accountsSection) accountsSection.style.display = 'none';
             if (analyticsView) analyticsView.style.display = 'none';
             if (systemView) systemView.style.display = 'none';
-            if (flowsView) flowsView.style.display = 'none';
             
             switch(view) {
                 case 'dashboard':
@@ -229,14 +226,6 @@ function setupEventListeners() {
                         systemView.style.display = 'block';
                         loadSystemHealth();
                         loadSystemLogs();
-                    }
-                    break;
-
-                case 'flows':
-                    // Show flows view
-                    if (flowsView) {
-                        flowsView.style.display = 'block';
-                        loadFlowsView();
                     }
                     break;
             }
@@ -439,10 +428,6 @@ function setupEventListeners() {
                 case 'chatbot':
                     openChatbotModal(accountId);
                     break;
-                case 'flows':
-                    // Navigate to flow builder with account pre-selected
-                    window.location.href = '/flow-builder?account=' + accountId;
-                    break;
                 case 'delete':
                     deleteAccount(accountId);
                     break;
@@ -628,10 +613,16 @@ function renderAccountsTable() {
         const escapedDescription = description.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         
         // Feature indicators
-        const features = account.features || { webhooks: { count: 0, active: 0 }, chatbot: { enabled: false }, flows: { count: 0, active: 0 } };
-        const hasActiveWebhooks = features.webhooks.active > 0;
-        const hasChatbot = features.chatbot.enabled;
-        const hasActiveFlows = features.flows.active > 0;
+        const defaultFeatures = { webhooks: { count: 0, active: 0 }, chatbot: { enabled: false } };
+        const features = {
+            ...defaultFeatures,
+            ...(account.features || {}),
+            webhooks: { ...defaultFeatures.webhooks, ...(account.features?.webhooks || {}) },
+            chatbot: { ...defaultFeatures.chatbot, ...(account.features?.chatbot || {}) }
+        };
+
+        const hasActiveWebhooks = (features.webhooks.active || 0) > 0;
+        const hasChatbot = !!features.chatbot.enabled;
         
         return `
         <tr>
@@ -650,9 +641,6 @@ function renderAccountsTable() {
                             </span>
                             <span class="feature-badge ${hasChatbot ? 'active' : 'inactive'}" title="AI Chatbot ${hasChatbot ? 'enabled' : 'disabled'}">
                                 <i class="fas fa-robot"></i> ${hasChatbot ? 'ON' : 'OFF'}
-                            </span>
-                            <span class="feature-badge ${hasActiveFlows ? 'active' : 'inactive'}" title="${features.flows.active}/${features.flows.count} flows active">
-                                <i class="fas fa-project-diagram"></i> ${features.flows.count > 0 ? features.flows.active + '/' + features.flows.count : '0'}
                             </span>
                         </div>
                     </div>
@@ -681,9 +669,6 @@ function renderAccountsTable() {
                     </button>
                     <button class="btn-action" data-action="chatbot" data-account-id="${account.id || account.account_id}" title="Configure Chatbot">
                         <i class="fas fa-robot"></i>
-                    </button>
-                    <button class="btn-action" data-action="flows" data-account-id="${account.id || account.account_id}" title="Manage Flows" style="background: linear-gradient(135deg, rgba(236, 72, 153, 0.2), rgba(168, 85, 247, 0.2)); border-color: rgba(236, 72, 153, 0.4);">
-                        <i class="fas fa-project-diagram"></i>
                     </button>
                     <button class="btn-action danger" data-action="delete" data-account-id="${account.id || account.account_id}" title="Delete Account">
                         <i class="fas fa-trash"></i>
@@ -1342,9 +1327,19 @@ async function handleCreateWebhook(e) {
     const url = document.getElementById('webhookUrl').value.trim();
     const secret = document.getElementById('webhookSecret').value.trim();
     const isActive = document.getElementById('webhookActive').checked;
+    
+    // Collect selected events
+    const events = [];
+    if (document.getElementById('eventMessage').checked) events.push('message');
+    if (document.getElementById('eventMessageAck').checked) events.push('message_ack');
 
     if (!accountId || !url) {
         showAlert('Please fill in all required fields', 'error');
+        return;
+    }
+    
+    if (events.length === 0) {
+        showAlert('Please select at least one event type', 'error');
         return;
     }
 
@@ -1357,6 +1352,7 @@ async function handleCreateWebhook(e) {
     try {
         const webhookData = {
             url: url,
+            events: events,
             is_active: isActive
         };
         
@@ -2712,201 +2708,6 @@ async function loadSystemHealth() {
 }
 
 // ===========================
-// FLOWS VIEW FUNCTIONS
-// ===========================
-
-let allFlows = [];
-
-async function loadFlowsView() {
-    const flowsLoading = document.getElementById('flowsLoading');
-    const flowsList = document.getElementById('flowsList');
-    
-    try {
-        if (flowsLoading) flowsLoading.style.display = 'block';
-        if (flowsList) flowsList.style.display = 'none';
-
-        // Fetch flows from API
-        const response = await fetch('/api/chatbot/flows', { credentials: 'include' });
-        if (!response.ok) throw new Error('Failed to fetch flows');
-        
-        allFlows = await response.json();
-        
-        // Update stats
-        const totalFlows = allFlows.length;
-        const activeFlows = allFlows.filter(f => f.is_active).length;
-        const accountsWithFlows = new Set(allFlows.map(f => f.account_id)).size;
-        
-        document.getElementById('totalFlowsStat').textContent = totalFlows;
-        document.getElementById('activeFlowsStat').textContent = activeFlows;
-        document.getElementById('flowAccountsStat').textContent = accountsWithFlows;
-        
-        // Render flows
-        renderFlowsList();
-        
-    } catch (error) {
-        console.error('Error loading flows:', error);
-        if (flowsList) {
-            flowsList.innerHTML = `
-                <div class="empty-state" style="text-align: center; padding: 40px;">
-                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: var(--warning); margin-bottom: 15px;"></i>
-                    <p style="color: var(--text-secondary);">Failed to load flows. Please try again.</p>
-                </div>
-            `;
-            flowsList.style.display = 'block';
-        }
-    } finally {
-        if (flowsLoading) flowsLoading.style.display = 'none';
-    }
-}
-
-function renderFlowsList() {
-    const flowsList = document.getElementById('flowsList');
-    if (!flowsList) return;
-    
-    if (allFlows.length === 0) {
-        flowsList.innerHTML = `
-            <div class="empty-state" style="text-align: center; padding: 40px;">
-                <i class="fas fa-project-diagram" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
-                <h3 style="margin-bottom: 10px;">No Flows Created Yet</h3>
-                <p style="color: var(--text-secondary); margin-bottom: 20px;">Create your first AI-powered flow to automate conversations.</p>
-                <a href="/flow-builder" class="btn-cyber">
-                    <span class="btn-content"><i class="fas fa-plus"></i> Create First Flow</span>
-                </a>
-            </div>
-        `;
-        flowsList.style.display = 'block';
-        return;
-    }
-    
-    // Group flows by account
-    const flowsByAccount = {};
-    allFlows.forEach(flow => {
-        const accountId = flow.account_id || 'unassigned';
-        if (!flowsByAccount[accountId]) {
-            flowsByAccount[accountId] = [];
-        }
-        flowsByAccount[accountId].push(flow);
-    });
-    
-    // Find account names from the global accounts array
-    const getAccountName = (accountId) => {
-        const account = accounts.find(a => a.id === accountId);
-        return account ? account.name : accountId.substring(0, 8) + '...';
-    };
-    
-    let html = '';
-    
-    Object.keys(flowsByAccount).forEach(accountId => {
-        const accountFlows = flowsByAccount[accountId];
-        const accountName = getAccountName(accountId);
-        const activeCount = accountFlows.filter(f => f.is_active).length;
-        
-        html += `
-            <div class="flow-account-section" style="margin-bottom: 25px; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden;">
-                <div style="background: rgba(var(--primary-rgb), 0.1); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <h3 style="margin: 0; font-size: 16px;">
-                            <i class="fab fa-whatsapp" style="color: #25D366; margin-right: 8px;"></i>
-                            ${accountName}
-                        </h3>
-                        <span style="font-size: 12px; color: var(--text-secondary);">
-                            ${accountFlows.length} flow${accountFlows.length !== 1 ? 's' : ''} • ${activeCount} active
-                        </span>
-                    </div>
-                    <a href="/flow-builder?account=${accountId}" class="btn-secondary" style="font-size: 12px; padding: 6px 12px;">
-                        <i class="fas fa-plus"></i> Add Flow
-                    </a>
-                </div>
-                <div style="padding: 15px;">
-        `;
-        
-        accountFlows.forEach(flow => {
-            const triggerBadge = flow.trigger_type === 'keyword' ? 
-                `<span class="badge" style="background: var(--primary); font-size: 10px;">Keywords: ${(flow.trigger_keywords || []).slice(0, 3).join(', ')}</span>` :
-                `<span class="badge" style="background: var(--info); font-size: 10px;">${flow.trigger_type || 'All Messages'}</span>`;
-            
-            const statusColor = flow.is_active ? 'var(--success)' : 'var(--text-secondary)';
-            const statusIcon = flow.is_active ? 'fa-check-circle' : 'fa-pause-circle';
-            const statusText = flow.is_active ? 'Active' : 'Inactive';
-            
-            html += `
-                <div class="flow-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: rgba(255,255,255,0.02); border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border-color);">
-                    <div style="flex: 1;">
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
-                            <span style="font-weight: 600;">${flow.name || 'Unnamed Flow'}</span>
-                            <span style="color: ${statusColor}; font-size: 12px;">
-                                <i class="fas ${statusIcon}"></i> ${statusText}
-                            </span>
-                        </div>
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 5px;">
-                            ${flow.description || 'No description'}
-                        </div>
-                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                            ${triggerBadge}
-                            ${flow.llm_provider ? `<span class="badge" style="background: var(--secondary); font-size: 10px;"><i class="fas fa-brain"></i> ${flow.llm_provider}</span>` : ''}
-                            ${flow.webhook_url ? `<span class="badge" style="background: var(--warning); font-size: 10px;"><i class="fas fa-link"></i> Webhook</span>` : ''}
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <a href="/flow-builder?flow=${flow.id}" class="btn-action" title="Edit Flow" style="background: var(--primary); color: white;">
-                            <i class="fas fa-edit"></i>
-                        </a>
-                        <button class="btn-action ${flow.is_active ? 'warning' : 'success'}" onclick="toggleFlowStatus('${flow.id}', ${!flow.is_active})" title="${flow.is_active ? 'Deactivate' : 'Activate'}">
-                            <i class="fas ${flow.is_active ? 'fa-pause' : 'fa-play'}"></i>
-                        </button>
-                        <button class="btn-action danger" onclick="deleteFlow('${flow.id}')" title="Delete Flow">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            `;
-        });
-        
-        html += '</div></div>';
-    });
-    
-    flowsList.innerHTML = html;
-    flowsList.style.display = 'block';
-}
-
-async function toggleFlowStatus(flowId, newStatus) {
-    try {
-        const response = await fetch(`/api/chatbot/flows/${flowId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ is_active: newStatus })
-        });
-        
-        if (!response.ok) throw new Error('Failed to update flow');
-        
-        showAlert(`Flow ${newStatus ? 'activated' : 'deactivated'} successfully`, 'success');
-        loadFlowsView(); // Refresh the list
-    } catch (error) {
-        console.error('Error toggling flow status:', error);
-        showAlert('Failed to update flow status', 'error');
-    }
-}
-
-async function deleteFlow(flowId) {
-    if (!confirm('Are you sure you want to delete this flow? This action cannot be undone.')) return;
-    
-    try {
-        const response = await fetch(`/api/chatbot/flows/${flowId}`, {
-            method: 'DELETE',
-            credentials: 'include'
-        });
-        
-        if (!response.ok) throw new Error('Failed to delete flow');
-        
-        showAlert('Flow deleted successfully', 'success');
-        loadFlowsView(); // Refresh the list
-    } catch (error) {
-        console.error('Error deleting flow:', error);
-        showAlert('Failed to delete flow', 'error');
-    }
-}
-
 // ===========================
 // NOTIFICATION SYSTEM
 // ===========================

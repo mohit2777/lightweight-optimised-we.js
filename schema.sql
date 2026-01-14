@@ -1,157 +1,197 @@
--- ============================================================================
--- WHATSAPP MULTI-AUTOMATION - DATABASE SCHEMA
--- ============================================================================
--- Run this in Supabase SQL Editor to set up the database
--- Compatible with: index.optimized.js, index.lite.js, index.js
--- ============================================================================
-
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- =============================================================================
+-- WhatsApp Multi-Automation - Complete Supabase Schema
+-- Run this in Supabase SQL Editor
+-- =============================================================================
 
 -- ============================================================================
--- CORE TABLE: WhatsApp Accounts
+-- CORE TABLES
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS whatsapp_accounts (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+-- Accounts table
+CREATE TABLE IF NOT EXISTS accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    status VARCHAR(50) DEFAULT 'initializing' CHECK (status IN ('initializing', 'qr_ready', 'ready', 'disconnected', 'auth_failed', 'error')),
     phone_number VARCHAR(50),
-    session_data TEXT, -- Base64 encoded WhatsApp Web session data for persistence
-    last_session_saved TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(50) DEFAULT 'disconnected',
+    session_data TEXT,  -- Baileys session data (base64 encoded)
+    last_session_saved TIMESTAMPTZ,
     qr_code TEXT,
     error_message TEXT,
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_active_at TIMESTAMP WITH TIME ZONE
+    last_active_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE whatsapp_accounts IS 'WhatsApp account information and session data';
-COMMENT ON COLUMN whatsapp_accounts.session_data IS 'Base64 encoded session for persistent authentication across restarts';
+-- Sessions table (alternative session storage - optional)
+CREATE TABLE IF NOT EXISTS sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    session_data TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(account_id)
+);
 
 -- ============================================================================
--- CORE TABLE: Webhooks
+-- WEBHOOKS
 -- ============================================================================
 
+-- Webhooks table
+-- Supported events: 'message', 'message_ack', '*' (all events)
+-- message_ack statuses: sent (2), delivered (3), read (4)
 CREATE TABLE IF NOT EXISTS webhooks (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
-    url VARCHAR(500) NOT NULL,
-    secret VARCHAR(255),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    events TEXT[] DEFAULT ARRAY['message'],
+    secret TEXT,
+    headers JSONB DEFAULT '{}',
+    max_retries INTEGER DEFAULT 5,
     is_active BOOLEAN DEFAULT true,
-    retry_count INTEGER DEFAULT 0,
-    last_success_at TIMESTAMP WITH TIME ZONE,
-    last_failure_at TIMESTAMP WITH TIME ZONE,
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE webhooks IS 'Webhook configurations for message forwarding to external services';
+-- Webhook delivery queue (for pending/retry deliveries)
+CREATE TABLE IF NOT EXISTS webhook_delivery_queue (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    webhook_id UUID REFERENCES webhooks(id) ON DELETE CASCADE,
+    account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    webhook_url TEXT NOT NULL,
+    webhook_secret TEXT,
+    payload JSONB NOT NULL,
+    max_retries INTEGER DEFAULT 5,
+    attempt_count INTEGER DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'pending',  -- pending, processing, success, failed, dead_letter
+    response_status INTEGER,
+    last_error TEXT,
+    next_attempt_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Webhook deliveries log (optional - for completed deliveries history)
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    webhook_id UUID REFERENCES webhooks(id) ON DELETE CASCADE,
+    account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    payload JSONB,
+    response_status INTEGER,
+    response_body TEXT,
+    attempts INTEGER DEFAULT 1,
+    status VARCHAR(50) DEFAULT 'success',
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    delivered_at TIMESTAMPTZ
+);
 
 -- ============================================================================
--- CORE TABLE: Message Logs
+-- AI CHATBOT
 -- ============================================================================
 
+-- AI Auto Reply configurations (per account)
+CREATE TABLE IF NOT EXISTS ai_auto_replies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    is_active BOOLEAN DEFAULT false,
+    provider VARCHAR(50) DEFAULT 'gemini',  -- gemini, groq, openai, anthropic, openrouter
+    model VARCHAR(100),
+    api_key TEXT,  -- Store encrypted in production
+    system_prompt TEXT DEFAULT 'You are a helpful assistant.',
+    temperature DECIMAL(3,2) DEFAULT 0.7,
+    max_tokens INTEGER DEFAULT 500,
+    history_limit INTEGER DEFAULT 10,  -- Number of messages to remember
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(account_id)
+);
+
+-- Chatbot conversation history (for AI memory)
+CREATE TABLE IF NOT EXISTS chatbot_conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    contact_number VARCHAR(50) NOT NULL,
+    context JSONB DEFAULT '{}',  -- Collected data, variables
+    status VARCHAR(50) DEFAULT 'active',  -- active, completed, expired
+    started_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Message logs (for conversation history retrieval by AI)
+-- Set DISABLE_MESSAGE_LOGGING=true to skip logging
 CREATE TABLE IF NOT EXISTS message_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
-    direction VARCHAR(50) NOT NULL CHECK (direction IN ('incoming', 'outgoing', 'webhook', 'webhook_incoming')),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    webhook_id UUID REFERENCES webhooks(id) ON DELETE SET NULL,
+    direction VARCHAR(20) NOT NULL,  -- incoming, outgoing
     message_id VARCHAR(255),
     sender VARCHAR(255),
     recipient VARCHAR(255),
     message TEXT,
+    media JSONB,
     timestamp BIGINT,
-    type VARCHAR(50),
+    type VARCHAR(50) DEFAULT 'text',
     chat_id VARCHAR(255),
     is_group BOOLEAN DEFAULT false,
     group_name VARCHAR(255),
-    media JSONB,
-    status VARCHAR(50) DEFAULT 'success' CHECK (status IN ('success', 'failed', 'pending', 'delivered', 'read')),
+    status VARCHAR(50) DEFAULT 'success',
     error_message TEXT,
-    webhook_id UUID REFERENCES webhooks(id) ON DELETE SET NULL,
-    webhook_url VARCHAR(500),
-    response_status INTEGER,
-    processing_time_ms INTEGER,
-    retry_count INTEGER DEFAULT 0,
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE message_logs IS 'Message activity logs (disable with DISABLE_MESSAGE_LOGGING=true to save egress)';
-
 -- ============================================================================
--- CORE TABLE: Webhook Delivery Queue
+-- PER-NUMBER SETTINGS (Whitelist/Blacklist)
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS webhook_delivery_queue (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    account_id UUID NOT NULL REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
-    webhook_id UUID NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
-    webhook_url VARCHAR(500) NOT NULL,
-    webhook_secret VARCHAR(255),
-    payload JSONB NOT NULL,
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'success', 'failed', 'dead_letter')),
-    attempt_count INTEGER DEFAULT 0,
-    max_retries INTEGER DEFAULT 5,
-    last_error TEXT,
-    response_status INTEGER,
-    next_attempt_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS account_number_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    phone_number VARCHAR(50) NOT NULL,
+    webhook_enabled BOOLEAN DEFAULT true,
+    chatbot_enabled BOOLEAN DEFAULT true,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(account_id, phone_number)
 );
 
-COMMENT ON TABLE webhook_delivery_queue IS 'Durable webhook delivery queue with retry support';
-
 -- ============================================================================
--- OPTIONAL TABLE: AI Auto Reply (Chatbot)
+-- INDEXES
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS ai_auto_replies (
-    account_id UUID PRIMARY KEY REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
-    provider TEXT NOT NULL,
-    api_key TEXT,
-    model TEXT,
-    system_prompt TEXT,
-    history_limit INTEGER DEFAULT 10,
-    temperature NUMERIC DEFAULT 0.7,
-    is_active BOOLEAN DEFAULT false,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+-- Core indexes
+CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_account_id ON sessions(account_id);
 
-COMMENT ON TABLE ai_auto_replies IS 'Per-account AI chatbot configuration (providers: gemini, groq, openrouter, etc.)';
-
--- ============================================================================
--- INDEXES FOR PERFORMANCE
--- ============================================================================
-
--- WhatsApp Accounts
-CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_status ON whatsapp_accounts(status);
-CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_phone ON whatsapp_accounts(phone_number) WHERE phone_number IS NOT NULL;
-
--- Webhooks
+-- Webhook indexes
 CREATE INDEX IF NOT EXISTS idx_webhooks_account_id ON webhooks(account_id);
-CREATE INDEX IF NOT EXISTS idx_webhooks_active ON webhooks(account_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_webhooks_active ON webhooks(is_active) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_webhook_queue_status ON webhook_delivery_queue(status);
+CREATE INDEX IF NOT EXISTS idx_webhook_queue_next_attempt ON webhook_delivery_queue(next_attempt_at) WHERE status IN ('pending', 'failed');
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook_id ON webhook_deliveries(webhook_id);
 
--- Message Logs
-CREATE INDEX IF NOT EXISTS idx_message_logs_account_id ON message_logs(account_id);
-CREATE INDEX IF NOT EXISTS idx_message_logs_created_at ON message_logs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_message_logs_direction ON message_logs(account_id, direction);
+-- AI/Chatbot indexes
+CREATE INDEX IF NOT EXISTS idx_ai_auto_replies_account ON ai_auto_replies(account_id);
+CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_account ON chatbot_conversations(account_id);
+CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_contact ON chatbot_conversations(account_id, contact_number);
+CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_active ON chatbot_conversations(status) WHERE status = 'active';
 
--- Webhook Queue
-CREATE INDEX IF NOT EXISTS idx_webhook_queue_pending ON webhook_delivery_queue(status, next_attempt_at) WHERE status = 'pending';
-CREATE INDEX IF NOT EXISTS idx_webhook_queue_account ON webhook_delivery_queue(account_id);
+-- Message log indexes
+CREATE INDEX IF NOT EXISTS idx_message_logs_account ON message_logs(account_id);
+CREATE INDEX IF NOT EXISTS idx_message_logs_created ON message_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_logs_conversation ON message_logs(account_id, sender, created_at DESC);
 
--- AI Auto Replies
-CREATE INDEX IF NOT EXISTS idx_ai_auto_replies_active ON ai_auto_replies(is_active) WHERE is_active = true;
+-- Number settings indexes
+CREATE INDEX IF NOT EXISTS idx_number_settings_account ON account_number_settings(account_id);
+CREATE INDEX IF NOT EXISTS idx_number_settings_phone ON account_number_settings(account_id, phone_number);
 
 -- ============================================================================
--- AUTO-UPDATE TIMESTAMPS
+-- TRIGGERS
 -- ============================================================================
 
+-- Updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -160,10 +200,15 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Apply triggers
-DROP TRIGGER IF EXISTS update_whatsapp_accounts_updated_at ON whatsapp_accounts;
-CREATE TRIGGER update_whatsapp_accounts_updated_at
-    BEFORE UPDATE ON whatsapp_accounts
+-- Apply updated_at triggers
+DROP TRIGGER IF EXISTS update_accounts_updated_at ON accounts;
+CREATE TRIGGER update_accounts_updated_at
+    BEFORE UPDATE ON accounts
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_sessions_updated_at ON sessions;
+CREATE TRIGGER update_sessions_updated_at
+    BEFORE UPDATE ON sessions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_webhooks_updated_at ON webhooks;
@@ -181,55 +226,74 @@ CREATE TRIGGER update_ai_auto_replies_updated_at
     BEFORE UPDATE ON ai_auto_replies
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ============================================================================
--- ROW LEVEL SECURITY
--- ============================================================================
+DROP TRIGGER IF EXISTS update_chatbot_conversations_updated_at ON chatbot_conversations;
+CREATE TRIGGER update_chatbot_conversations_updated_at
+    BEFORE UPDATE ON chatbot_conversations
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Enable RLS on all tables
-ALTER TABLE whatsapp_accounts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE webhooks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE webhook_delivery_queue ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_auto_replies ENABLE ROW LEVEL SECURITY;
-
--- Allow service role full access (for server-side operations)
-DROP POLICY IF EXISTS "Service role access on whatsapp_accounts" ON whatsapp_accounts;
-CREATE POLICY "Service role access on whatsapp_accounts" ON whatsapp_accounts
-    FOR ALL USING (auth.role() = 'service_role');
-
-DROP POLICY IF EXISTS "Service role access on webhooks" ON webhooks;
-CREATE POLICY "Service role access on webhooks" ON webhooks
-    FOR ALL USING (auth.role() = 'service_role');
-
-DROP POLICY IF EXISTS "Service role access on message_logs" ON message_logs;
-CREATE POLICY "Service role access on message_logs" ON message_logs
-    FOR ALL USING (auth.role() = 'service_role');
-
-DROP POLICY IF EXISTS "Service role access on webhook_delivery_queue" ON webhook_delivery_queue;
-CREATE POLICY "Service role access on webhook_delivery_queue" ON webhook_delivery_queue
-    FOR ALL USING (auth.role() = 'service_role');
-
-DROP POLICY IF EXISTS "Service role access on ai_auto_replies" ON ai_auto_replies;
-CREATE POLICY "Service role access on ai_auto_replies" ON ai_auto_replies
-    FOR ALL USING (auth.role() = 'service_role');
+DROP TRIGGER IF EXISTS update_number_settings_updated_at ON account_number_settings;
+CREATE TRIGGER update_number_settings_updated_at
+    BEFORE UPDATE ON account_number_settings
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
--- OPTIONAL: Express Session Table (for PostgreSQL session storage)
+-- HELPER FUNCTIONS (Optional - for dashboard stats)
 -- ============================================================================
--- Uncomment if you want persistent dashboard sessions across restarts
--- Requires DATABASE_URL environment variable
 
--- CREATE TABLE IF NOT EXISTS "session" (
---     "sid" VARCHAR NOT NULL COLLATE "default" PRIMARY KEY,
---     "sess" JSON NOT NULL,
---     "expire" TIMESTAMP(6) NOT NULL
--- );
--- CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+-- Get daily message stats
+CREATE OR REPLACE FUNCTION get_daily_message_stats(days_count INTEGER DEFAULT 7)
+RETURNS TABLE(date TEXT, incoming BIGINT, outgoing BIGINT, total BIGINT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        TO_CHAR(m.created_at, 'YYYY-MM-DD') as date,
+        COUNT(*) FILTER (WHERE m.direction = 'incoming') as incoming,
+        COUNT(*) FILTER (WHERE m.direction = 'outgoing') as outgoing,
+        COUNT(*) as total
+    FROM message_logs m
+    WHERE m.created_at >= NOW() - (days_count || ' days')::INTERVAL
+      AND m.sender != 'status@broadcast'
+    GROUP BY TO_CHAR(m.created_at, 'YYYY-MM-DD')
+    ORDER BY date DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Get all accounts stats
+CREATE OR REPLACE FUNCTION get_all_accounts_stats()
+RETURNS TABLE(
+    account_id UUID,
+    total BIGINT,
+    incoming BIGINT,
+    outgoing BIGINT,
+    success BIGINT,
+    failed BIGINT,
+    outgoing_success BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        m.account_id,
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE m.direction = 'incoming') as incoming,
+        COUNT(*) FILTER (WHERE m.direction = 'outgoing') as outgoing,
+        COUNT(*) FILTER (WHERE m.status = 'success') as success,
+        COUNT(*) FILTER (WHERE m.status = 'failed') as failed,
+        COUNT(*) FILTER (WHERE m.direction = 'outgoing' AND m.status = 'success') as outgoing_success
+    FROM message_logs m
+    WHERE m.sender != 'status@broadcast'
+    GROUP BY m.account_id;
+END;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================================
--- DONE! Your database is ready.
+-- ROW LEVEL SECURITY (Optional - uncomment to enable)
 -- ============================================================================
--- Set these environment variables in your deployment:
---   SUPABASE_URL=https://your-project.supabase.co
---   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
--- ============================================================================
+
+-- ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE webhooks ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE webhook_delivery_queue ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE ai_auto_replies ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE chatbot_conversations ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE account_number_settings ENABLE ROW LEVEL SECURITY;

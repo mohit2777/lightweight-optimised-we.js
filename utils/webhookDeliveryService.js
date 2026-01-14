@@ -93,10 +93,24 @@ class WebhookDeliveryService extends EventEmitter {
       return;
     }
 
+    // Determine event type from messageData
+    const eventType = messageData.event || 'message';
+
+    // Filter webhooks that are subscribed to this event type
+    const subscribedWebhooks = webhooks.filter(webhook => {
+      const events = webhook.events || ['message'];
+      // Support both exact match and wildcard
+      return events.includes(eventType) || events.includes('*') || events.includes('all');
+    });
+
+    if (subscribedWebhooks.length === 0) {
+      return;
+    }
+
     const sanitizedPayload = JSON.parse(JSON.stringify(messageData));
 
     try {
-      await Promise.all(webhooks.map(webhook => {
+      await Promise.all(subscribedWebhooks.map(webhook => {
         return getDb().enqueueWebhookDelivery({
           accountId,
           webhook,
@@ -272,7 +286,24 @@ class WebhookDeliveryService extends EventEmitter {
   }
 
   buildPayload(webhook, messageData) {
+    const eventType = messageData.event || 'message';
+
     if (this.isN8n(webhook.url)) {
+      // Handle message_ack events (read receipts)
+      if (eventType === 'message_ack') {
+        return {
+          event: 'message_ack',
+          account_id: messageData.account_id,
+          message_id: messageData.message_id,
+          recipient: messageData.recipient,
+          status: messageData.ack_name, // 'sent', 'delivered', 'read'
+          status_code: messageData.ack, // 2=sent, 3=delivered, 4=read
+          timestamp: messageData.timestamp,
+          optimized: true
+        };
+      }
+
+      // Handle regular message events
       const {
         account_id,
         direction,
@@ -287,6 +318,7 @@ class WebhookDeliveryService extends EventEmitter {
       } = messageData;
 
       return {
+        event: 'message',
         account_id,
         direction,
         sender,
