@@ -42,7 +42,7 @@ console.error = (...args) => {
 };
 // ============================================================================
 
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, jidDecode, jidNormalizedUser, makeInMemoryStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, jidDecode } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../config/database');
@@ -57,17 +57,13 @@ const path = require('path');
 // LID to Phone Number mapping cache (in-memory)
 const lidPhoneCache = new Map();
 
-// In-memory store for contacts (used for LID to phone lookups)
-const contactStores = new Map();
-
 /**
  * Get actual phone number from any JID format
- * For @lid contacts, looks up the real phone number from contacts or cache
+ * For @lid contacts, looks up from cache or returns LID
  * @param {string} jid - The JID (can be @lid, @s.whatsapp.net, @c.us, etc.)
- * @param {object} sock - Baileys socket (optional, for contact lookup)
  * @returns {string} Phone number with country code (e.g., "918949171377")
  */
-function getPhoneNumber(jid, sock = null) {
+function getPhoneNumber(jid) {
   if (!jid) return null;
   
   // Parse the JID
@@ -79,23 +75,13 @@ function getPhoneNumber(jid, sock = null) {
     return decoded.user; // e.g., "918949171377"
   }
   
-  // For @lid, check cache first
+  // For @lid, check cache
   const lidUser = decoded.user;
   if (lidPhoneCache.has(lidUser)) {
     return lidPhoneCache.get(lidUser);
   }
   
-  // Try to look up from contact store
-  if (sock && sock.store) {
-    const contact = sock.store.contacts?.[jid];
-    if (contact?.phoneNumber) {
-      const phone = contact.phoneNumber.replace(/[^0-9]/g, '');
-      lidPhoneCache.set(lidUser, phone);
-      return phone;
-    }
-  }
-  
-  // Return LID user as fallback (will show as internal ID until we get the phone)
+  // Return LID user as fallback
   return lidUser;
 }
 
@@ -108,7 +94,7 @@ function storeLidPhoneMapping(lid, phone) {
   if (decoded && lid.endsWith('@lid')) {
     const cleanPhone = phone.replace(/[^0-9]/g, '');
     lidPhoneCache.set(decoded.user, cleanPhone);
-    logger.debug(`[LID Cache] Mapped ${decoded.user} → ${cleanPhone}`);
+    logger.info(`[LID Cache] Mapped LID ${decoded.user} → Phone ${cleanPhone}`);
   }
 }
 
@@ -354,10 +340,6 @@ class WhatsAppManager {
 
       // Store for message retry (fixes "Waiting for this message" issue)
       const messageRetryMap = new Map();
-      
-      // Create in-memory store for contacts (enables LID to phone lookup)
-      const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
-      contactStores.set(accountId, store);
 
       const sock = makeWASocket({
         version,
@@ -382,15 +364,10 @@ class WhatsAppManager {
           if (messageRetryMap.has(key.id)) {
             return messageRetryMap.get(key.id);
           }
-          // Try from store
-          return store.loadMessage(key.remoteJid, key.id);
+          return { conversation: '' };
         },
         msgRetryCounterCache: messageRetryMap
       });
-      
-      // Bind store to socket events (populates contacts, chats, messages)
-      store.bind(sock.ev);
-      sock.store = store;
 
       // Store messageRetryMap with the client for later use
       sock.messageRetryMap = messageRetryMap;
@@ -638,9 +615,8 @@ class WhatsAppManager {
       const chatJid = message.key.remoteJid;
       
       // Get actual phone number with country code (e.g., "918949171377")
-      // For @lid contacts, tries to look up from contact store
-      const senderPhone = getPhoneNumber(senderJid, sock);
-      const chatPhone = getPhoneNumber(chatJid, sock);
+      const senderPhone = getPhoneNumber(senderJid);
+      const chatPhone = getPhoneNumber(chatJid);
       
       // Log with actual phone number
       logger.info(`📩 Incoming message from ${senderPhone}: "${messageText?.slice(0, 50) || '[media]'}"`);
