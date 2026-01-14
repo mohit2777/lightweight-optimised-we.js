@@ -538,7 +538,6 @@ class WhatsAppManager {
       else if (messageContent.locationMessage) messageType = 'location';
 
       const isGroup = message.key.remoteJid.endsWith('@g.us');
-      const sender = message.key.participant || message.key.remoteJid;
 
       const messageData = {
         event: 'message',  // Event type for webhook filtering
