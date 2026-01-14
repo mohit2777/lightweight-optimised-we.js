@@ -1,4 +1,4 @@
-const { db, MissingChatbotsTableError } = require('../../config/database');
+const { db } = require('../../config/database');
 const logger = require('../logger');
 const OpenAIProvider = require('./providers/OpenAIProvider');
 const GeminiProvider = require('./providers/GeminiProvider');
@@ -97,9 +97,10 @@ class ChatbotManager {
       return response;
 
     } catch (error) {
-      // Handle missing table error gracefully
-      if (error instanceof MissingChatbotsTableError || error.code === 'PGRST205' || (error.message && error.message.includes('chatbots'))) {
-        logger.error(`[Chatbot] CRITICAL: The 'chatbots' table is missing in Supabase. Please run the migration script 'supabase-schema.sql'.`);
+      // Handle missing table error gracefully (ai_auto_replies table)
+      if (error.code === 'PGRST116' || error.code === 'PGRST205' || 
+          (error.message && (error.message.includes('ai_auto_replies') || error.message.includes('chatbots')))) {
+        logger.error(`[Chatbot] CRITICAL: The AI config table is missing in Supabase. Please run the migration script 'supabase-schema.sql'.`);
         return null;
       }
 

@@ -54,8 +54,9 @@ const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
 
-// LID to Phone Number mapping cache (in-memory)
+// LID to Phone Number mapping cache (in-memory with size limit)
 const lidPhoneCache = new Map();
+const LID_CACHE_MAX_SIZE = 10000; // Prevent unbounded growth
 
 /**
  * Get actual phone number from any JID format
@@ -87,11 +88,17 @@ function getPhoneNumber(jid) {
 
 /**
  * Store LID to phone mapping (call this when we discover the mapping)
+ * Implements LRU-style eviction when cache gets too large
  */
 function storeLidPhoneMapping(lid, phone) {
   if (!lid || !phone) return;
   const decoded = jidDecode(lid);
   if (decoded && lid.endsWith('@lid')) {
+    // LRU eviction: remove oldest entry if cache is full
+    if (lidPhoneCache.size >= LID_CACHE_MAX_SIZE) {
+      const oldestKey = lidPhoneCache.keys().next().value;
+      lidPhoneCache.delete(oldestKey);
+    }
     const cleanPhone = phone.replace(/[^0-9]/g, '');
     lidPhoneCache.set(decoded.user, cleanPhone);
     logger.info(`[LID Cache] Mapped LID ${decoded.user} → Phone ${cleanPhone}`);
@@ -675,9 +682,11 @@ class WhatsAppManager {
         logger.warn(`Failed to log incoming message: ${err.message}`);
       });
 
-      // Update last active
-      await db.updateAccount(accountId, {
+      // Update last active (don't crash on DB error)
+      db.updateAccount(accountId, {
         last_active_at: new Date().toISOString()
+      }).catch(err => {
+        logger.warn(`Failed to update last_active_at: ${err.message}`);
       });
 
       // Queue webhook deliveries
@@ -879,13 +888,15 @@ class WhatsAppManager {
     const jid = this.formatPhoneNumber(number);
     const buffer = Buffer.from(base64Data, 'base64');
 
-    // Show typing indicator
+    // Show typing indicator (don't fail media send on presence errors)
     const typingDelay = parseInt(process.env.TYPING_DELAY_MS) || 1500;
     if (typingDelay > 0) {
-      await sock.presenceSubscribe(jid);
-      await sock.sendPresenceUpdate('composing', jid);
-      await new Promise(resolve => setTimeout(resolve, typingDelay));
-      await sock.sendPresenceUpdate('paused', jid);
+      try {
+        await sock.presenceSubscribe(jid);
+        await sock.sendPresenceUpdate('composing', jid);
+        await new Promise(resolve => setTimeout(resolve, typingDelay));
+        await sock.sendPresenceUpdate('paused', jid);
+      } catch (e) { /* ignore presence errors */ }
     }
 
     // Determine message type based on mimetype
@@ -1145,15 +1156,31 @@ class WhatsAppManager {
     this.isShuttingDown = true;
     logger.info(`Shutting down ${this.clients.size} client(s)...`);
 
+    // First, save all sessions (wait for completion)
+    const savePromises = [];
+    for (const [accountId, authState] of this.authStates.entries()) {
+      if (authState?.saveAllToDatabase) {
+        logger.info(`Saving session for ${accountId}...`);
+        savePromises.push(
+          authState.saveAllToDatabase(true).catch(err => {
+            logger.warn(`Failed to save session for ${accountId}: ${err.message}`);
+          })
+        );
+      }
+    }
+    
+    // Wait for all session saves to complete (with timeout)
+    if (savePromises.length > 0) {
+      await Promise.race([
+        Promise.all(savePromises),
+        new Promise(resolve => setTimeout(resolve, 10000)) // 10s timeout
+      ]);
+      logger.info(`Session saves completed`);
+    }
+
+    // Then close all sockets
     for (const [accountId, sock] of this.clients.entries()) {
       try {
-        // Force save session before closing (bypass debounce)
-        const authState = this.authStates.get(accountId);
-        if (authState?.saveAllToDatabase) {
-          logger.info(`Saving session for ${accountId}...`);
-          await authState.saveAllToDatabase(true).catch(() => {});
-        }
-
         sock.end(undefined);
         logger.info(`Closed ${accountId}`);
       } catch (error) {
@@ -1165,6 +1192,7 @@ class WhatsAppManager {
     this.accountStatus.clear();
     this.qrCodes.clear();
     this.reconnecting.clear();
+    this.deletedAccounts.clear();
     this.authStates.clear();
 
     logger.info('WhatsAppManager shutdown complete');

@@ -57,20 +57,10 @@ const login = async (req, res) => {
       });
     }
     
-    // Verify password - use constant-time comparison for security
-    // In production, you should store hashed passwords in database
-    const passwordMatch = await new Promise((resolve) => {
-      bcrypt.compare(password, bcrypt.hashSync(expectedPassword, 10), (err, result) => {
-        if (err) {
-          logger.error('Password comparison error:', err);
-          resolve(false);
-        }
-        resolve(result);
-      });
-    });
-    
-    // For simplicity, we'll use direct comparison (not recommended for production)
-    const isValid = password === expectedPassword;
+    // Verify password using bcrypt for timing-attack resistance
+    // We hash the expected password and compare (note: in production, store pre-hashed passwords)
+    const expectedHash = bcrypt.hashSync(expectedPassword, 10);
+    const isValid = await bcrypt.compare(password, expectedHash);
     
     if (isValid) {
       // Set session data
